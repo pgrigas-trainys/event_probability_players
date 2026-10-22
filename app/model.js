@@ -217,6 +217,138 @@ function playerMean(line, pOver, k = PLAYER_VAR_K) {
   return s * s;
 }
 
+// ---------- Dirichlet žaidėjų dalių modelis ----------
+// Komandos taškai T (iš tikslaus rezultato modelio) dalijami žaidėjams: dalys (S₁…S_k, S_kiti) ~ Dirichlet(c·m₁, …, c·m_k, c·m_kiti),
+// žaidėjo taškai Xᵢ = Sᵢ·T. Vienam žaidėjui Sᵢ ~ Beta(c·mᵢ, c·(1−mᵢ)), nepriklausoma nuo T, todėl
+// P(Xᵢ > linija) = E_T[1 − I_{linija/T}(c·mᵢ, c·(1−mᵢ))]. mᵢ parenkamas, kad ši tikimybė sutaptų su rinkos tikimybe be maržos;
+// c (koncentracija) nustatoma ranka arba įvertinama iš žaidėjų, turinčių kelias linijas. Dalies sd = √(m(1−m)/(c+1)).
+function lgamma(x) { // Lanczos
+  const g = 7, k = [0.99999999999980993, 676.5203681218851, -1259.1392167224028, 771.32342877765313, -176.61502916214059,
+    12.507343278686905, -0.13857109526572012, 9.9843695780195716e-6, 1.5056327351493116e-7];
+  if (x < 0.5) return Math.log(Math.PI / Math.sin(Math.PI * x)) - lgamma(1 - x);
+  x -= 1; let a = k[0]; const t = x + g + 0.5;
+  for (let i = 1; i < 9; i++) a += k[i] / (x + i);
+  return 0.5 * Math.log(2 * Math.PI) + (x + 0.5) * Math.log(t) - t + Math.log(a);
+}
+function betacf(a, b, x) { // grandininė trupmena nepilnajai beta funkcijai
+  const TINY = 1e-300, qab = a + b, qap = a + 1, qam = a - 1;
+  let c = 1, d = 1 - qab * x / qap; if (Math.abs(d) < TINY) d = TINY; d = 1 / d; let h = d;
+  for (let m = 1; m <= 300; m++) {
+    const m2 = 2 * m;
+    let aa = m * (b - m) * x / ((qam + m2) * (a + m2));
+    d = 1 + aa * d; if (Math.abs(d) < TINY) d = TINY; c = 1 + aa / c; if (Math.abs(c) < TINY) c = TINY; d = 1 / d; h *= d * c;
+    aa = -(a + m) * (qab + m) * x / ((a + m2) * (qap + m2));
+    d = 1 + aa * d; if (Math.abs(d) < TINY) d = TINY; c = 1 + aa / c; if (Math.abs(c) < TINY) c = TINY; d = 1 / d;
+    const del = d * c; h *= del; if (Math.abs(del - 1) < 1e-13) break;
+  }
+  return h;
+}
+function betaCDF(x, a, b) {
+  if (x <= 0) return 0; if (x >= 1) return 1;
+  const bt = Math.exp(lgamma(a + b) - lgamma(a) - lgamma(b) + a * Math.log(x) + b * Math.log(1 - x));
+  return x < (a + 1) / (a + b + 2) ? bt * betacf(a, b, x) / a : 1 - bt * betacf(b, a, 1 - x) / b;
+}
+const bisect = (f, lo, hi, it = 60) => { for (let i = 0; i < it; i++) { const mid = (lo + hi) / 2; if (f(mid)) hi = mid; else lo = mid; } return (lo + hi) / 2; };
+const betaQuantile = (q, a, b) => bisect(x => betaCDF(x, a, b) >= q, 0, 1);
+// Komandos taškų normalusis skirstinys kaip svoriai taškuose ±4σ.
+function teamNodes(mu, sd, n = 41) {
+  const out = []; let tot = 0;
+  for (let i = 0; i < n; i++) { const z = -4 + 8 * i / (n - 1), t = mu + z * sd, w = Math.exp(-z * z / 2); if (t > 1) { out.push([t, w]); tot += w; } }
+  return out.map(([t, w]) => [t, w / tot]);
+}
+function sharePOver(m, c, L, nodes) {
+  const a = c * m, b = c * (1 - m); let p = 0;
+  for (const [t, w] of nodes) p += w * (1 - betaCDF(L / t, a, b));
+  return p;
+}
+const probit = p => PhiInv(Math.min(0.995, Math.max(0.005, p)));
+const golden = (f, lo, hi, it = 60) => {
+  const r = (Math.sqrt(5) - 1) / 2; let x1 = hi - r * (hi - lo), x2 = lo + r * (hi - lo), f1 = f(x1), f2 = f(x2);
+  for (let i = 0; i < it; i++) {
+    if (f1 < f2) { hi = x2; x2 = x1; f2 = f1; x1 = hi - r * (hi - lo); f1 = f(x1); }
+    else { lo = x1; x1 = x2; f1 = f2; x2 = lo + r * (hi - lo); f2 = f(x2); }
+  }
+  return (lo + hi) / 2;
+};
+// lines = [{L, p}] (p = rinkos P(daugiau) be maržos). Grąžina vidutinę dalį m ir paklaidą probit skalėje.
+function fitShare(lines, c, nodes) {
+  const sse = m => lines.reduce((s, l) => s + (probit(sharePOver(m, c, l.L, nodes)) - probit(l.p)) ** 2, 0);
+  const m = Math.exp(golden(u => sse(Math.exp(u)), Math.log(0.002), Math.log(0.9)));
+  return { m, sse: sse(m) };
+}
+const pointsQuantile = (q, m, c, nodes, hi) => {
+  const a = c * m, b = c * (1 - m);
+  return bisect(x => nodes.reduce((s, [t, w]) => s + w * betaCDF(x / t, a, b), 0) >= q, 0, hi, 40);
+};
+// team = {mu, sd}; players = [{id, n, lines: [{L, p}]}]. Grąžina kiekvieno žaidėjo dalį, intervalus ir modelio tikimybes.
+function dirichletTeam(team, players, c) {
+  const nodes = teamNodes(team.mu, team.sd);
+  let sse = 0;
+  const res = players.map(pl => {
+    const f = fitShare(pl.lines, c, nodes); sse += f.sse;
+    const m = f.m, a = c * m, b = c * (1 - m);
+    return { id: pl.id, n: pl.n, m, lo: betaQuantile(0.1, a, b), hi: betaQuantile(0.9, a, b), mean: m * team.mu,
+      ptsLo: pointsQuantile(0.1, m, c, nodes, team.mu + 6 * team.sd), ptsHi: pointsQuantile(0.9, m, c, nodes, team.mu + 6 * team.sd),
+      lines: pl.lines.map(l => ({ L: l.L, p: l.p, pm: sharePOver(m, c, l.L, nodes) })) };
+  });
+  const sum = res.reduce((s, r) => s + r.m, 0);
+  return { c, mu: team.mu, sd: team.sd, players: res, rest: 1 - sum, sse };
+}
+// Koncentracijos įvertis: c, kuriam modelis geriausiai atkuria visas žaidėjų linijas (informatyvūs tik žaidėjai su ≥ 2 linijomis).
+// groups = [{team: {mu, sd}, players: [...]}]. Grąžina null, jei nėra žaidėjo su keliomis linijomis.
+function fitConcentration(groups) {
+  const multi = groups.flatMap(g => g.players.filter(p => p.lines.length >= 2).map(p => ({ nodes: teamNodes(g.team.mu, g.team.sd), lines: p.lines })));
+  if (!multi.length) return null;
+  const obj = c => multi.reduce((s, p) => s + fitShare(p.lines, c, p.nodes).sse, 0);
+  let best = Math.log(3), bv = Infinity;
+  for (let i = 0; i <= 24; i++) { const u = Math.log(3) + (Math.log(1500) - Math.log(3)) * i / 24, v = obj(Math.exp(u)); if (v < bv) { bv = v; best = u; } }
+  const step = (Math.log(1500) - Math.log(3)) / 24;
+  return { c: Math.exp(golden(u => obj(Math.exp(u)), best - step, best + step, 30)), players: multi.length };
+}
+
+// ---------- Monte Carlo: rezultatas ir žaidėjų taškai kartu ----------
+function mulberry32(seed) { return () => { seed |= 0; seed = seed + 0x6D2B79F5 | 0; let t = Math.imul(seed ^ seed >>> 15, 1 | seed);
+  t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+function gammaSample(k, rnd, norm) { // Marsaglia–Tsang
+  if (k < 1) return gammaSample(k + 1, rnd, norm) * Math.pow(rnd(), 1 / k);
+  const d = k - 1 / 3, c = 1 / Math.sqrt(9 * d);
+  for (;;) { let x, v; do { x = norm(); v = 1 + c * x; } while (v <= 0); v = v * v * v; const u = rnd();
+    if (u < 1 - 0.0331 * x * x * x * x || Math.log(u) < 0.5 * x * x + d * (1 - v + Math.log(v))) return d * v; }
+}
+// M = scoreModel rezultatas; teams = {home: {c, players: [{id, m}]}, away: {...}}. Grąžina n imčių: H, A ir kiekvieno žaidėjo taškai.
+function simulateGame(M, teams, n = 40000, seed = 12345) {
+  const rnd = mulberry32(seed); let spare = null;
+  const norm = () => { if (spare !== null) { const s = spare; spare = null; return s; }
+    let u = 0; while (u === 0) u = rnd(); const r = Math.sqrt(-2 * Math.log(u)), th = 2 * Math.PI * rnd(); spare = r * Math.sin(th); return r * Math.cos(th); };
+  const rho = Math.max(-0.95, Math.min(0.95, M.rho)), H = new Float64Array(n), A = new Float64Array(n), P = {};
+  const tm = ["home", "away"].map(t => { const T = teams[t] || { c: 1, players: [] };
+    const ms = T.players.map(p => p.m), sum = ms.reduce((s, m) => s + m, 0), scale = sum > 0.98 ? 0.98 / sum : 1;
+    T.players.forEach(p => { P[p.id] = new Float64Array(n); });
+    return { c: T.c, ids: T.players.map(p => p.id), alpha: [...ms.map(m => T.c * m * scale), T.c * Math.max(0.02, 1 - sum * scale)] }; });
+  for (let i = 0; i < n; i++) {
+    const z1 = norm(), z2 = norm();
+    H[i] = Math.max(0, Math.round(M.mh + M.sh * z1));
+    A[i] = Math.max(0, Math.round(M.ma + M.sa * (rho * z1 + Math.sqrt(1 - rho * rho) * z2)));
+    tm.forEach((T, ti) => {
+      if (!T.ids.length) return;
+      const g = T.alpha.map(a => gammaSample(a, rnd, norm)), tot = g.reduce((s, x) => s + x, 0), pts = ti ? A[i] : H[i];
+      T.ids.forEach((id, j) => { P[id][i] = Math.round(g[j] / tot * pts); });
+    });
+  }
+  return { n, H, A, P };
+}
+// Sąlygos kaip conditionProbability, papildomai v = žaidėjo id (jo taškai). Grąžina {p, se}.
+function conditionProbabilityMC(sim, conds) {
+  const get = v => v === "home" ? i => sim.H[i] : v === "away" ? i => sim.A[i] : v === "total" ? i => sim.H[i] + sim.A[i]
+    : v === "diff" ? i => sim.H[i] - sim.A[i] : sim.P[v] ? (arr => i => arr[i])(sim.P[v]) : null;
+  const cs = conds.map(c => ({ f: get(c.v), op: OPS[c.op], x: Number(c.x) }));
+  if (cs.some(c => !c.f || !c.op || !isFinite(c.x))) throw new Error("Netinkama sąlyga");
+  let k = 0;
+  for (let i = 0; i < sim.n; i++) if (cs.every(c => c.op(c.f(i), c.x))) k++;
+  const p = k / sim.n;
+  return { p, se: Math.sqrt(p * (1 - p) / sim.n) };
+}
+
 // Komanda iš teksto: „namai“/„svečiai“ (home/away) arba komandos pavadinimas; null, jei neaišku.
 const normTxt = s => String(s || "").trim().toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
 function teamKey(s, home, away) {
@@ -232,5 +364,6 @@ function teamKey(s, home, away) {
 }
 
 if (typeof module !== "undefined") {
-  module.exports = { erf, Phi, PhiInv, rowCalc, fit, pOver, scoreModel, gridCells, conditionProbability, VARS, OPS, parseOddsCSV, STATS, statKey, parsePlayerCSV, teamKey, playerMean, PLAYER_VAR_K };
+  module.exports = { erf, Phi, PhiInv, rowCalc, fit, pOver, scoreModel, gridCells, conditionProbability, VARS, OPS, parseOddsCSV, STATS, statKey, parsePlayerCSV, teamKey, playerMean, PLAYER_VAR_K,
+    betaCDF, betaQuantile, teamNodes, sharePOver, fitShare, dirichletTeam, fitConcentration, simulateGame, conditionProbabilityMC };
 }

@@ -123,4 +123,34 @@ for (const mu of [12, 14.5, 17, 19]) {
 assert.ok(M.playerMean(22.5, 0.55) > 22.5 && M.playerMean(22.5, 0.45) < 22.5, "daugiau tikėtiniau -> vidurkis virš linijos");
 assert.equal(M.playerMean("", 0.5), null);
 
+// Dirichlet: beta skirstinys (palyginta su scipy)
+near(M.betaCDF(0.3, 2, 5), 0.579825, 1e-6, "beta CDF");
+near(M.betaQuantile(0.9, 12, 48), 0.2678191, 1e-6, "beta kvantilis");
+// Vienos linijos žaidėjas: modelis tiksliai atkuria rinkos tikimybę
+const TEAM = { mu: 112, sd: 11 }, NODES = M.teamNodes(TEAM.mu, TEAM.sd);
+const one = M.fitShare([{ L: 22.5, p: 0.508 }], 60, NODES);
+near(M.sharePOver(one.m, 60, 22.5, NODES), 0.508, 1e-4, "viena linija atkuriama");
+// Žinomi parametrai (m 0.2, c 60) -> kelių linijų tikimybės -> modelis atkuria m ir c
+const TRUE_C = 60, TRUE_M = 0.2, LINES = [17.5, 20.5, 22.5, 24.5, 27.5];
+const gl = LINES.map(L => ({ L, p: M.sharePOver(TRUE_M, TRUE_C, L, NODES) }));
+near(M.fitShare(gl, TRUE_C, NODES).m, TRUE_M, 1e-4, "dalis iš kelių linijų");
+const fc = M.fitConcentration([{ team: TEAM, players: [{ id: "x", n: "X", lines: gl }] }]);
+near(fc.c, TRUE_C, 0.5, "koncentracija iš kelių linijų");
+assert.equal(M.fitConcentration([{ team: TEAM, players: [{ id: "x", n: "X", lines: [gl[2]] }] }]), null, "viena linija c neįvertina");
+// Komanda: dalys, likutis, intervalai
+const DT = M.dirichletTeam(TEAM, [{ id: "a", n: "A", lines: [{ L: 22.5, p: 0.508 }] }, { id: "b", n: "B", lines: [{ L: 11.5, p: 0.533 }] }], 60);
+near(DT.rest, 1 - DT.players[0].m - DT.players[1].m, 1e-12, "likusi dalis");
+assert.ok(DT.players[0].lo < DT.players[0].m && DT.players[0].m < DT.players[0].hi, "dalies intervalas");
+near(DT.players[0].mean, DT.players[0].m * TEAM.mu, 1e-9, "tikėtini taškai = dalis × komandos taškai");
+// Monte Carlo sutampa su tiksliais skaičiavimais
+const SMd = { mh: 112, ma: 108, sh: 11, sa: 11, rho: 0.1 };
+const sim = M.simulateGame(SMd, { home: { c: 60, players: DT.players.map(p => ({ id: p.id, m: p.m })) }, away: { c: 60, players: [] } }, 40000, 1);
+const mean = arr => arr.reduce((x, y) => x + y, 0) / arr.length;
+near(mean(sim.P.a), DT.players[0].m * 112, 0.25, "MC žaidėjo vidurkis");
+near(M.conditionProbabilityMC(sim, [{ v: "a", op: ">", x: 22.5 }]).p, DT.players[0].lines[0].pm, 0.012, "MC P(daugiau) ≈ modelis");
+near(M.conditionProbabilityMC(sim, [{ v: "diff", op: ">", x: 0 }]).p, M.conditionProbability(SMd, [{ v: "diff", op: ">", x: 0 }]), 0.01, "MC rezultatas ≈ tinklelis");
+const both = M.conditionProbabilityMC(sim, [{ v: "a", op: ">", x: 22.5 }, { v: "b", op: ">", x: 11.5 }]).p;
+assert.ok(both < 0.6 && both > 0.15, "dviejų žaidėjų sąlyga");
+assert.throws(() => M.conditionProbabilityMC(sim, [{ v: "nera", op: ">", x: 1 }]));
+
 console.log("Visi skaičiavimų testai praėjo.");

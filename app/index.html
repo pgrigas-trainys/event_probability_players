@@ -121,6 +121,15 @@ input[type=file] { display: none; }
 .sharebar i { display: block; height: 100%; border-right: 1px solid var(--surface); }
 .pl-home .sharebar i { background: var(--home); } .pl-away .sharebar i { background: var(--away); }
 .plsum .note { margin-top: 6px; } .plsum .num { font-weight: 500; } .warnt { color: var(--warn); }
+.dirt { margin-top: 8px; }
+.dirt td { vertical-align: top; padding: 4px 6px; }
+.dirt td:first-child { font-weight: 500; }
+.dirt tr.rest td { color: var(--muted); border-bottom: 0; }
+.dirt td { font-size: .85rem; }
+.dirt td.fo { font-family: var(--f-mono); font-variant-numeric: tabular-nums; font-size: .8rem; color: var(--muted); line-height: 1.6; }
+.dirt td.p { font-size: .85rem; }
+.cbox { display: inline-flex; gap: 6px; align-items: center; }
+.cbox input { width: 7ch; font-family: var(--f-mono); padding: 4px 6px; border: 1px solid var(--line); border-radius: 4px; background: var(--sunk); color: var(--fg); text-align: right; }
 .plpanels { display: flex; flex-direction: column; gap: 14px; }
 .pl-home h2 { color: var(--home); } .pl-away h2 { color: var(--away); }
 .pltools select { font: inherit; font-size: .82rem; padding: 4px 6px; border: 1px solid var(--line); border-radius: 5px; background: var(--surface); color: var(--fg); }
@@ -255,7 +264,7 @@ input[type=file] { display: none; }
         <p id="qNote"></p>
       </div>
     </div>
-    <p class="note">Įrašykite sąlygą žodžiais ir Claude ją paverčia sąlygų sąrašu. Sąlygas galite pataisyti ar pridėti ranka. Visos sąlygos turi išsipildyti kartu. Skaičiuojama iš to paties modelio kaip tikslaus rezultato lenta, pagrindinio laiko rezultatui: lygiosios (po kurių būna pratęsimas) nelaikomos nė vienos komandos pergale.</p>
+    <p class="note">Įrašykite sąlygą žodžiais ir Claude ją paverčia sąlygų sąrašu. Sąlygas galite pataisyti ar pridėti ranka. Visos sąlygos turi išsipildyti kartu. Skaičiuojama iš to paties modelio kaip tikslaus rezultato lenta, pagrindinio laiko rezultatui: lygiosios (po kurių būna pratęsimas) nelaikomos nė vienos komandos pergale. Galima naudoti ir žaidėjų taškus (žaidėjai su rodikliu „Taškai“ skirtuke „Žaidėjai“): tada rezultatas ir žaidėjų taškai simuliuojami kartu, žaidėjų dalys pagal Dirichlet modelį.</p>
   </section>
 
   <section id="view-pl" role="tabpanel" aria-labelledby="tab-pl" hidden>
@@ -265,10 +274,15 @@ input[type=file] { display: none; }
       <button class="btn" id="plCsv" type="button">Įkelti CSV</button>
       <input type="file" accept=".csv,text/csv,text/plain" multiple id="plCsvFile">
       <button class="btn" id="plClearAll" type="button">Išvalyti visus žaidėjus</button>
+      <span class="cbox"><label for="plC" title="Dirichlet koncentracija: kuo didesnė, tuo mažiau žaidėjų dalys svyruoja tarp rungtynių">Koncentracija c</label>
+        <input id="plC" inputmode="decimal" aria-describedby="plCInfo">
+        <button class="btn small" id="plCFit" type="button">Įvertinti iš linijų</button></span>
+      <span class="status" id="plCInfo"></span>
       <span class="status" id="plGlobal"></span>
     </div>
     <div class="plpanels" id="plPanels"></div>
-    <p class="note">Tikimybės be bukmekerio maržos (marža paskirstyta proporcingai). Teisingas koeficientas = 1 / tikimybė. Nuskaityti žaidėjai dedami į tos komandos bloką, į kurį įkėlėte nuotrauką, nebent Claude tiksliai žino, kad žaidėjas žaidžia kitoje komandoje. Žaidėją į kitą komandą perkelia mygtukas ⇄. Jei žaidėjas su tuo pačiu rodikliu ir linija jau yra, jo koeficientai atnaujinami. CSV: (komanda), žaidėjas, (rodiklis), linija, daugiau, mažiau. Komanda gali būti „namai“, „svečiai“ arba komandos pavadinimas. Tikėtini žaidėjo taškai įvertinti iš linijos ir tikimybės be maržos, laikant, kad taškų dispersija proporcinga vidurkiui (σ ≈ √(2.2·μ), pvz. 20 taškų žaidėjui σ ≈ 6.6). Kai tikimybė arti 50 %, tikėtini taškai beveik lygūs linijai. Dalis = žaidėjo tikėtini taškai / komandos tikėtini taškai iš tikslaus rezultato modelio.</p>
+    <p class="note">Tikimybės be bukmekerio maržos (marža paskirstyta proporcingai). Teisingas koeficientas = 1 / tikimybė. Nuskaityti žaidėjai dedami į tos komandos bloką, į kurį įkėlėte nuotrauką, nebent Claude tiksliai žino, kad žaidėjas žaidžia kitoje komandoje. Žaidėją į kitą komandą perkelia mygtukas ⇄. Jei žaidėjas su tuo pačiu rodikliu ir linija jau yra, jo koeficientai atnaujinami. CSV: (komanda), žaidėjas, (rodiklis), linija, daugiau, mažiau. Komanda gali būti „namai“, „svečiai“ arba komandos pavadinimas.</p>
+    <p class="note"><b>Dirichlet modelis.</b> Komandos taškai T imami iš tikslaus rezultato modelio. Juos išvardyti žaidėjai ir „kiti“ dalijasi dalimis (S₁, …, S_k, S_kiti) ~ Dirichlet(c·m₁, …, c·m_k, c·m_kiti), kurių suma visada 100 %; žaidėjo taškai = S·T. Kiekvieno žaidėjo vidutinė dalis m parenkama taip, kad modelio P(daugiau) sutaptų su rinkos tikimybe be maržos (jei linijų kelios – kuo geriau visoms). Koncentracija c nusako, kiek dalys svyruoja: dalies sd = √(m(1−m)/(c+1)), pvz. m 20 %, c 60 -> ±5 proc. p. Iš vienos linijos c įvertinti neįmanoma, todėl ji nustatoma ranka; jei bent vienam žaidėjui įvestos kelios taškų linijos, c galima įvertinti iš jų. Dirichlet modelis visada skaičiuojamas JavaScript'u.</p>
   </section>
 
   <div id="view-odds" role="tabpanel" aria-labelledby="tab-odds">
@@ -835,14 +849,19 @@ function centerTop() {
 }
 // ---------- conditions ----------
 const OPL = { ">": "daugiau nei", ">=": "bent", "<": "mažiau nei", "<=": "ne daugiau nei", "=": "lygiai" };
-const varLabel = v => ({ home: `${homeN()} taškai`, away: `${awayN()} taškai`, total: "Taškų suma", diff: `Skirtumas (${homeN()} − ${awayN()})` })[v];
+// Žaidėjų kintamieji: "pl:home:Vardas" = žaidėjo taškai (iš Dirichlet modelio skirtuke „Žaidėjai“).
+const plVarName = v => String(v).split(":").slice(2).join(":");
+const varLabel = v => String(v).startsWith("pl:") ? `${plVarName(v)} taškai`
+  : ({ home: `${homeN()} taškai`, away: `${awayN()} taškai`, total: "Taškų suma", diff: `Skirtumas (${homeN()} − ${awayN()})` })[v];
+const isVar = v => VARS.some(x => x[0] === v) || playerVars().some(x => x[0] === v);
 let textSample = null, qCtl = null;
 state.conds ||= [];
 
 function condsHTML() {
   if (!state.conds.length) return `<p class="note">Sąlygų dar nėra. Įrašykite sąlygą viršuje arba spauskite „+ Sąlyga“.</p>`;
   return state.conds.map((c, i) => `<div class="cond" data-ci="${i}"><span class="and">${i ? "ir" : ""}</span>
-    <select data-k="v" aria-label="Kas">${VARS.map(([v]) => `<option value="${v}"${c.v === v ? " selected" : ""}>${esc(varLabel(v))}</option>`).join("")}</select>
+    <select data-k="v" aria-label="Kas">${[...VARS.map(([v]) => v), ...playerVars().map(([v]) => v), ...(isVar(c.v) ? [] : [c.v])].map(v =>
+      `<option value="${esc(v)}"${c.v === v ? " selected" : ""}>${esc(varLabel(v) || v)}${isVar(v) ? "" : " (nėra)"}</option>`).join("")}</select>
     <select data-k="op" aria-label="Palyginimas">${Object.keys(OPS).map(o => `<option value="${o}"${c.op === o ? " selected" : ""}>${OPL[o]}</option>`).join("")}</select>
     <input data-k="x" inputmode="decimal" value="${esc(c.x)}" aria-label="Skaičius">
     <button class="x" type="button" data-cdel="${i}" aria-label="Pašalinti sąlygą">×</button></div>`).join("");
@@ -851,16 +870,19 @@ function renderConds() { $("conds").innerHTML = condsHTML(); }
 function renderQ(F) {
   F ||= Object.fromEntries(MARKETS.map(m => [m.key, E.fit(m, state.rows[m.key])]));
   const M = E.scoreModel(F);
-  const conds = state.conds.map(c => ({ f: VARS.find(v => v[0] === c.v)?.[1], op: OPS[c.op], x: parseFloat(String(c.x).replace(",", ".")) }))
-    .filter(c => c.f && c.op && isFinite(c.x));
+  const conds = state.conds.map(c => ({ v: c.v, op: c.op, x: parseFloat(String(c.x).replace(",", ".")) })).filter(c => isVar(c.v) && OPS[c.op] && isFinite(c.x));
   if (!M) { $("qP").textContent = "–"; $("qFair").textContent = ""; $("qNote").textContent = "Reikia handikapo ir taškų sumos koeficientų skiltyje „Koeficientai“."; return; }
   if (!conds.length) { $("qP").textContent = "–"; $("qFair").textContent = ""; $("qNote").textContent = "Pridėkite bent vieną sąlygą."; return; }
-  const p = E.conditionProbability(M, state.conds.filter(c => VARS.some(v => v[0] === c.v) && OPS[c.op] && isFinite(parseFloat(String(c.x).replace(",", "."))))
-    .map(c => ({ v: c.v, op: c.op, x: parseFloat(String(c.x).replace(",", ".")) })));
+  // Be žaidėjų: tikslus skaičiavimas iš rezultatų tinklelio. Su žaidėjais: Monte Carlo (rezultatas + Dirichlet dalys kartu).
+  let p, mc = null;
+  if (conds.some(c => c.v.startsWith("pl:"))) { mc = conditionProbabilityMC(playerSim(M), conds); p = mc.p; }
+  else p = E.conditionProbability(M, conds);
   $("qP").textContent = pct(p);
   $("qFair").textContent = p > 0 ? `Teisingas koeficientas ${(1 / p).toFixed(2)}` : "";
   const skipped = state.conds.length - conds.length;
-  $("qNote").textContent = `Tikėtinas rezultatas ${M.mh.toFixed(1)} : ${M.ma.toFixed(1)}, ρ ${M.rho.toFixed(3)}.` + (skipped ? ` ${skipped} neužpildytos sąlygos praleistos.` : "");
+  $("qNote").textContent = `Tikėtinas rezultatas ${M.mh.toFixed(1)} : ${M.ma.toFixed(1)}, ρ ${M.rho.toFixed(3)}.`
+    + (mc ? ` Su žaidėjais skaičiuojama Monte Carlo (${(PL_SIMS / 1000).toFixed(0)} tūkst. rungtynių imčių, ±${(mc.se * 196).toFixed(1)} proc. p.), žaidėjų dalys pagal Dirichlet modelį.` : "")
+    + (skipped ? ` ${skipped} neužpildytos sąlygos praleistos.` : "");
 }
 function renderExamples() {
   const ex = [`abi komandos įmes daugiau nei 75 taškų ir laimės ${awayN()}`, `${homeN()} laimės daugiau nei 10 taškų`, `bendra suma mažiau nei 160 ir laimės ${homeN()}`];
@@ -870,9 +892,10 @@ async function parseQuery(text) {
   if (!textSample) return;
   qCtl?.abort(); qCtl = new AbortController();
   $("qGo").disabled = true; $("qStatus").className = "status"; $("qStatus").textContent = "Claude verčia sąlygą…";
-  const prompt = `Convert a Lithuanian (or English) basketball betting question into a list of conditions on the final score. All conditions are combined with AND.
+  const prompt = `Convert a Lithuanian (or English) basketball betting question into a list of conditions on the final score and player points. All conditions are combined with AND.
 Home team: "${homeN()}". Away team: "${awayN()}".
-Variables: "home" = home team points, "away" = away team points, "total" = home + away, "diff" = home − away.
+Variables: "home" = home team points, "away" = away team points, "total" = home + away, "diff" = home − away.${playerVars().length ? `
+Player point variables (use the exact id string as "v"): ${playerVars().map(([v, t]) => `"${v}" = points of ${plVarName(v)} (${teamN(t)})`).join("; ")}. Match player names loosely (surname only, spelling, case, endings). "<player> įmes daugiau nei N" -> that player's id ">" N.` : ""}
 Operators: ">", ">=", "<", "<=", "=". "x" is a number.
 Rules: "daugiau nei N" / "more than N" -> ">" N; "bent N" / "at least N" / "N ir daugiau" -> ">=" N; "mažiau nei N" -> "<" N; "ne daugiau nei N" -> "<=" N.
 "abi komandos" (both teams) -> one condition for home AND one for away. "<team> laimės" (wins) -> diff ">" 0 for home, diff "<" 0 for away.
@@ -883,7 +906,7 @@ Question: ${text}`;
   try {
     const res = await textSample.json(prompt, { modelTier: "quick", signal: qCtl.signal });
     const list = (Array.isArray(res?.conditions) ? res.conditions : [])
-      .filter(c => VARS.some(v => v[0] === c.v) && OPS[c.op] && isFinite(Number(c.x)))
+      .filter(c => isVar(c.v) && OPS[c.op] && isFinite(Number(c.x)))
       .map(c => ({ v: c.v, op: c.op, x: String(Number(c.x)) }));
     if (!list.length) { $("qStatus").className = "status err"; $("qStatus").textContent = res?.problem || "Nepavyko suprasti sąlygos. Pabandykite paprasčiau arba sudėkite sąlygas ranka."; return; }
     state.conds = list; save(); renderConds(); renderQ();
@@ -924,6 +947,9 @@ const teamN = t => t === "home" ? homeN() : awayN();
 const other = t => t === "home" ? "away" : "home";
 const statOpts = s => STATS.map(([k, t]) => `<option value="${k}"${k === s ? " selected" : ""}>${esc(t)}</option>`).join("");
 $("plStat").innerHTML = statOpts(state.plStat);
+var plReady; // true, kai žaidėjų dalis paruošta (sąlygos iki tol žaidėjų nemato)
+if (!(+state.plC > 0)) state.plC = 60;
+$("plC").value = state.plC;
 const plStatus = (t, text, cls = "") => { const el = $("plStatus-" + t); el.textContent = text; el.className = "status " + cls; };
 const plGlobal = (text, cls = "") => { $("plGlobal").textContent = text; $("plGlobal").className = "status " + cls; };
 
@@ -942,7 +968,7 @@ function plPanelHTML(t) {
       <span class="status" id="plStatus-${t}"></span>
     </div>
     <div class="tw"><table class="pltable">
-      <thead><tr><th>Žaidėjas</th><th>Rodiklis</th><th>Linija</th><th>Daugiau</th><th>Mažiau</th><th>P daugiau</th><th>P mažiau</th><th>Teis. daugiau</th><th>Teis. mažiau</th><th>Marža</th><th title="Tikėtini taškai pagal liniją ir koeficientus">Tikėtini t.</th><th title="Dalis tikėtinų komandos taškų">Dalis</th><th></th><th></th></tr></thead>
+      <thead><tr><th>Žaidėjas</th><th>Rodiklis</th><th>Linija</th><th>Daugiau</th><th>Mažiau</th><th>P daugiau</th><th>P mažiau</th><th>Teis. daugiau</th><th>Teis. mažiau</th><th>Marža</th><th title="Dalis × komandos tikėtini taškai">Tikėtini t.</th><th title="Vidutinė dalis komandos taškuose (Dirichlet modelis)">Dalis</th><th></th><th></th></tr></thead>
       <tbody id="plRows-${t}"></tbody>
     </table></div>
     <div class="plsum" id="plSum-${t}"></div>
@@ -974,15 +1000,52 @@ function renderPlayers() {
 function teamMeans() {
   const F = Object.fromEntries(MARKETS.map(m => [m.key, E.fit(m, state.rows[m.key])]));
   const SM = E.scoreModel(F);
-  if (SM) return { home: SM.mh, away: SM.ma, src: "tikslaus rezultato modelio" };
-  return { home: F.home ? F.home.mu : null, away: F.away ? F.away.mu : null, src: "komandos taškų rinkos" };
+  if (SM) return { home: { mu: SM.mh, sd: SM.sh }, away: { mu: SM.ma, sd: SM.sa }, src: "tikslaus rezultato modelio" };
+  const g = f => f ? { mu: f.mu, sd: f.sigma } : null;
+  return { home: g(F.home), away: g(F.away), src: "komandos taškų rinkos" };
+}
+// Dirichlet modelio duomenys komandai: žaidėjai su rodikliu „Taškai“, sugrupuoti pagal vardą (kelios linijos -> viena dalis).
+function plTeamInput(t) {
+  const by = new Map();
+  for (const r of state.players) {
+    if (r.t !== t || r.s !== "pts" || !r.n.trim()) continue;
+    const c = E.rowCalc(PL_M, r); if (!c || !(c.k > 0)) continue;
+    const key = r.n.trim().toLowerCase();
+    if (!by.has(key)) by.set(key, { id: `pl:${t}:${r.n.trim()}`, n: r.n.trim(), lines: [] });
+    by.get(key).lines.push({ L: c.k, p: c.pa });
+  }
+  return [...by.values()].map(p => ({ ...p, lines: p.lines.sort((x, y) => x.L - y.L) }));
+}
+const dirCache = new Map();
+function dirFit(t, TM = teamMeans()) {
+  const team = TM[t], players = plTeamInput(t);
+  if (!team || !players.length) return null;
+  const key = JSON.stringify([team, players, state.plC]);
+  if (!dirCache.has(key)) { if (dirCache.size > 40) dirCache.clear(); dirCache.set(key, dirichletTeam(team, players, state.plC)); }
+  return dirCache.get(key);
+}
+function playerVars() {
+  if (!plReady) return [];
+  const TM = teamMeans();
+  return TEAMS.flatMap(t => (dirFit(t, TM)?.players || []).map(p => [p.id, t]));
+}
+const PL_SIMS = 40000;
+let simKey = "", simVal = null;
+function playerSim(M) {
+  const TM = teamMeans();
+  const teams = Object.fromEntries(TEAMS.map(t => { const D = dirFit(t, TM); return [t, { c: state.plC, players: D ? D.players.map(p => ({ id: p.id, m: p.m })) : [] }]; }));
+  const key = JSON.stringify([M.mh, M.ma, M.sh, M.sa, M.rho, teams]);
+  if (key !== simKey) { simKey = key; simVal = simulateGame(M, teams, PL_SIMS); }
+  return simVal;
 }
 const f1 = x => x.toFixed(1);
+const pc1 = x => (x * 100).toFixed(1) + "%";
 function plCompute() {
   const TM = teamMeans();
   for (const t of TEAMS) {
     let n = 0, mSum = 0;
-    const team = TM[t], byPlayer = new Map(); // žaidėjas -> tikėtinų taškų įverčiai (gali būti kelios linijos)
+    const team = TM[t], D = dirFit(t, TM);
+    const share = new Map((D?.players || []).map(p => [p.n.toLowerCase(), p]));
     $("plRows-" + t).querySelectorAll("tr[data-i]").forEach(tr => {
       const r = state.players[+tr.dataset.i], c = E.rowCalc(PL_M, r);
       const [pa, pb, fa, fb, mg, pm, psh] = tr.querySelectorAll("td.pa, td.pb, td.fa, td.fb, td.m, td.pm, td.psh");
@@ -990,25 +1053,29 @@ function plCompute() {
       fa.textContent = c ? (1 / c.pa).toFixed(2) : ""; fb.textContent = c ? (1 / c.pb).toFixed(2) : "";
       mg.textContent = c ? pct(c.margin) : "";
       pa.classList.toggle("fav", !!c && c.pa > c.pb); pb.classList.toggle("fav", !!c && c.pb > c.pa);
-      const mu = c && r.s === "pts" ? playerMean(r.l, c.pa) : null;
-      pm.textContent = mu != null ? f1(mu) : "–";
-      psh.textContent = mu != null && team ? (mu / team * 100).toFixed(1) + "%" : "–";
-      if (mu != null && r.n.trim()) { const k = r.n.trim().toLowerCase(); (byPlayer.get(k) || byPlayer.set(k, []).get(k)).push(mu); }
+      const sp = r.s === "pts" ? share.get(r.n.trim().toLowerCase()) : null;
+      pm.textContent = sp ? f1(sp.mean) : "–"; psh.textContent = sp ? pc1(sp.m) : "–";
       if (c) { n++; mSum += c.margin; }
     });
     $("plInfo-" + t).innerHTML = n ? `Eilučių <b>${n}</b> · vid. marža <b>${pct(mSum / n)}</b>` : "";
-    // Suvestinė: kiek komandos taškų tenka išvardytiems žaidėjams ir kiek lieka kitiems.
-    const box = $("plSum-" + t);
-    if (!team) { box.innerHTML = byPlayer.size ? `<p class="note">Dalims apskaičiuoti reikia komandos tikėtinų taškų: įveskite handikapo ir taškų sumos (arba komandų taškų) koeficientus skiltyje „Koeficientai“.</p>` : ""; continue; }
-    if (!byPlayer.size) { box.innerHTML = `<p class="note">${esc(teamN(t))} tikėtini taškai <b class="num">${f1(team)}</b> (iš ${TM.src}). Dalys skaičiuojamos žaidėjų eilutėms su rodikliu „Taškai“.</p>`; continue; }
-    const names = Object.fromEntries(state.players.filter(p => p.t === t).map(p => [p.n.trim().toLowerCase(), p.n.trim()]));
-    const list = [...byPlayer].map(([k, v]) => [names[k] || k, v.reduce((x, y) => x + y, 0) / v.length]).sort((x, y) => y[1] - x[1]);
-    const listed = list.reduce((x, [, v]) => x + v, 0), rest = team - listed;
-    const segs = list.map(([nm, v], i) => `<i style="width:${Math.max(0, v / Math.max(team, listed) * 100)}%;opacity:${1 - (i % 2) * 0.35}" title="${esc(nm)}: ${f1(v)} (${(v / team * 100).toFixed(1)}%)"></i>`).join("");
+    const box = $("plSum-" + t), hasPts = state.players.some(p => p.t === t && p.s === "pts");
+    if (!team) { box.innerHTML = hasPts ? `<p class="note">Dalims apskaičiuoti reikia komandos taškų skirstinio: įveskite handikapo ir taškų sumos (arba komandų taškų) koeficientus skiltyje „Koeficientai“.</p>` : ""; continue; }
+    if (!D) { box.innerHTML = `<p class="note">${esc(teamN(t))} tikėtini taškai <b class="num">${f1(team.mu)}</b>, σ ${f1(team.sd)} (iš ${TM.src}). Dalys skaičiuojamos žaidėjų eilutėms su rodikliu „Taškai“.</p>`; continue; }
+    const list = [...D.players].sort((x, y) => y.m - x.m);
+    const segs = list.map((p, i) => `<i style="width:${Math.max(0, p.m / Math.max(1, 1 - D.rest) * 100)}%;opacity:${1 - (i % 2) * 0.35}" title="${esc(p.n)}: ${pc1(p.m)}"></i>`).join("");
+    const lineTxt = p => p.lines.map(l => `${l.L}: ${pc1(l.p)} → ${pc1(l.pm)}`).join("<br>");
     box.innerHTML = `<div class="sharebar">${segs}</div>
-      <p class="note">${esc(teamN(t))} tikėtini taškai <b class="num">${f1(team)}</b> (iš ${TM.src}) · išvardyti žaidėjai <b class="num">${f1(listed)}</b> (${(listed / team * 100).toFixed(1)}%) · ` +
-      (rest >= 0 ? `kiti žaidėjai <b class="num">${f1(rest)}</b> (${(rest / team * 100).toFixed(1)}%)` : `<span class="warnt">žaidėjų suma viršija komandos taškus ${f1(-rest)} t.: linijos ir komandos rinkos nesutampa</span>`) + `</p>`;
+      <div class="tw"><table class="dirt"><thead><tr><th>Žaidėjas</th><th>Dalis</th><th>Dalis 80 %</th><th>Tikėtini t.</th><th>Taškai 80 %</th><th title="Rinkos tikimybė be maržos → Dirichlet modelio tikimybė">Linija: P daugiau rinka → modelis</th></tr></thead><tbody>
+      ${list.map(p => `<tr><td>${esc(p.n)}</td><td class="p">${pc1(p.m)}</td><td class="fo">${pc1(p.lo)} – ${pc1(p.hi)}</td><td class="p">${f1(p.mean)}</td><td class="fo">${p.ptsLo.toFixed(0)} – ${p.ptsHi.toFixed(0)}</td><td class="fo">${lineTxt(p)}</td></tr>`).join("")}
+      <tr class="rest"><td>Kiti žaidėjai</td><td class="p">${D.rest > 0 ? pc1(D.rest) : "–"}</td><td></td><td class="p">${D.rest > 0 ? f1(D.rest * team.mu) : "–"}</td><td></td><td></td></tr>
+      </tbody></table></div>
+      <p class="note">${esc(teamN(t))} tikėtini taškai <b class="num">${f1(team.mu)}</b>, σ ${f1(team.sd)} (iš ${TM.src}) · Dirichlet koncentracija c = <b class="num">${f1(state.plC)}</b>` +
+      (D.rest < 0.02 ? ` · <span class="warnt">žaidėjų dalių suma ${pc1(1 - D.rest)}: linijos ir komandos rinkos nesutampa, simuliacijoje dalys sumažintos proporcingai</span>` : "") + `</p>`;
   }
+  const multi = TEAMS.some(t => plTeamInput(t).some(p => p.lines.length >= 2));
+  $("plCFit").disabled = !multi;
+  $("plCFit").title = multi ? "" : "Reikia bent vieno žaidėjo su keliomis taškų linijomis";
+  renderQ();
 }
 // Naujos eilutės pridedamos; tas pats žaidėjas su tuo pačiu rodikliu ir linija atnaujinamas (ir perkeliamas į nurodytą komandą).
 function mergePlayers(rows) {
@@ -1111,9 +1178,23 @@ plp.addEventListener("dragover", e => { const d = e.target.closest(".drop"); if 
 plp.addEventListener("dragleave", e => { const d = e.target.closest(".drop"); if (d) d.classList.remove("over"); });
 plp.addEventListener("drop", e => { const d = e.target.closest(".drop"); if (!d) return; e.preventDefault(); d.classList.remove("over"); addPlFiles(d.dataset.pldrop, e.dataTransfer.files); });
 $("plStat").addEventListener("change", e => { state.plStat = e.target.value; save(); });
+$("plC").addEventListener("input", e => {
+  const c = parseFloat(e.target.value.replace(",", "."));
+  if (!(c > 0.5 && c < 5000)) { $("plCInfo").className = "status err"; $("plCInfo").textContent = "c turi būti teigiamas skaičius, pvz. 60."; return; }
+  state.plC = c; save(); $("plCInfo").textContent = ""; plCompute();
+});
+$("plCFit").addEventListener("click", () => {
+  const TM = teamMeans();
+  const groups = TEAMS.filter(t => TM[t]).map(t => ({ team: TM[t], players: plTeamInput(t) }));
+  const r = fitConcentration(groups);
+  if (!r) { $("plCInfo").className = "status err"; $("plCInfo").textContent = "Reikia bent vieno žaidėjo su keliomis taškų linijomis ir komandos koeficientų."; return; }
+  state.plC = Math.round(r.c * 10) / 10; save(); $("plC").value = state.plC; plCompute();
+  $("plCInfo").className = "status ok"; $("plCInfo").textContent = `Įvertinta iš ${r.players} žaidėj. kelių linijų: c ≈ ${f1(r.c)}.`;
+});
 $("plCsv").addEventListener("click", () => $("plCsvFile").click());
 $("plCsvFile").addEventListener("change", e => { [...e.target.files].forEach(f => loadPlCSV(f, null)); e.target.value = ""; });
 $("plClearAll").addEventListener("click", () => { clearPlayers(null); plGlobal(""); });
+plReady = true;
 renderPlayers();
 
 function setTab(t) {
