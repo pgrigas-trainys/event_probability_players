@@ -204,6 +204,19 @@ function parsePlayerCSV(text) {
   return { rows, count: rows.length };
 }
 
+// Žaidėjo tikėtini taškai iš vienos daugiau/mažiau linijos. Taškai laikomi normaliuoju skirstiniu, kurio
+// dispersija proporcinga vidurkiui: X ~ N(μ, k·μ), k = 2.2 (pvz. μ 20 -> σ 6.6, μ 10 -> σ 4.7).
+// Iš P(X > linija) = p:  linija − μ = z·√(k·μ), z = Φ⁻¹(1 − p)  ->  kvadratinė lygtis √μ atžvilgiu.
+// Kai p arti 50 %, μ beveik lygus linijai ir k beveik nesvarbus.
+const PLAYER_VAR_K = 2.2;
+function playerMean(line, pOver, k = PLAYER_VAR_K) {
+  const L = parseFloat(String(line).replace(",", "."));
+  if (!(L > 0) || !(pOver > 0 && pOver < 1)) return null;
+  const z = PhiInv(1 - Math.min(0.99, Math.max(0.01, pOver))), rk = Math.sqrt(k);
+  const s = (-z * rk + Math.sqrt(z * z * k + 4 * L)) / 2;
+  return s * s;
+}
+
 // Komanda iš teksto: „namai“/„svečiai“ (home/away) arba komandos pavadinimas; null, jei neaišku.
 const normTxt = s => String(s || "").trim().toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
 function teamKey(s, home, away) {
@@ -219,5 +232,5 @@ function teamKey(s, home, away) {
 }
 
 if (typeof module !== "undefined") {
-  module.exports = { erf, Phi, PhiInv, rowCalc, fit, pOver, scoreModel, gridCells, conditionProbability, VARS, OPS, parseOddsCSV, STATS, statKey, parsePlayerCSV, teamKey };
+  module.exports = { erf, Phi, PhiInv, rowCalc, fit, pOver, scoreModel, gridCells, conditionProbability, VARS, OPS, parseOddsCSV, STATS, statKey, parsePlayerCSV, teamKey, playerMean, PLAYER_VAR_K };
 }

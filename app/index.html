@@ -117,6 +117,10 @@ input[type=file] { display: none; }
 .pltable td.fo { font-family: var(--f-mono); font-size: .8rem; color: var(--muted); }
 .pltable td.fav { font-weight: 600; color: var(--accent); }
 .pltools { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; font-size: .82rem; color: var(--muted); }
+.sharebar { display: flex; height: 10px; border-radius: 4px; overflow: hidden; background: var(--line); margin-top: 4px; }
+.sharebar i { display: block; height: 100%; border-right: 1px solid var(--surface); }
+.pl-home .sharebar i { background: var(--home); } .pl-away .sharebar i { background: var(--away); }
+.plsum .note { margin-top: 6px; } .plsum .num { font-weight: 500; } .warnt { color: var(--warn); }
 .plpanels { display: flex; flex-direction: column; gap: 14px; }
 .pl-home h2 { color: var(--home); } .pl-away h2 { color: var(--away); }
 .pltools select { font: inherit; font-size: .82rem; padding: 4px 6px; border: 1px solid var(--line); border-radius: 5px; background: var(--surface); color: var(--fg); }
@@ -264,7 +268,7 @@ input[type=file] { display: none; }
       <span class="status" id="plGlobal"></span>
     </div>
     <div class="plpanels" id="plPanels"></div>
-    <p class="note">Tikimybės be bukmekerio maržos (marža paskirstyta proporcingai). Teisingas koeficientas = 1 / tikimybė. Nuskaityti žaidėjai dedami į tos komandos bloką, į kurį įkėlėte nuotrauką, nebent Claude tiksliai žino, kad žaidėjas žaidžia kitoje komandoje. Žaidėją į kitą komandą perkelia mygtukas ⇄. Jei žaidėjas su tuo pačiu rodikliu ir linija jau yra, jo koeficientai atnaujinami. CSV: (komanda), žaidėjas, (rodiklis), linija, daugiau, mažiau. Komanda gali būti „namai“, „svečiai“ arba komandos pavadinimas.</p>
+    <p class="note">Tikimybės be bukmekerio maržos (marža paskirstyta proporcingai). Teisingas koeficientas = 1 / tikimybė. Nuskaityti žaidėjai dedami į tos komandos bloką, į kurį įkėlėte nuotrauką, nebent Claude tiksliai žino, kad žaidėjas žaidžia kitoje komandoje. Žaidėją į kitą komandą perkelia mygtukas ⇄. Jei žaidėjas su tuo pačiu rodikliu ir linija jau yra, jo koeficientai atnaujinami. CSV: (komanda), žaidėjas, (rodiklis), linija, daugiau, mažiau. Komanda gali būti „namai“, „svečiai“ arba komandos pavadinimas. Tikėtini žaidėjo taškai įvertinti iš linijos ir tikimybės be maržos, laikant, kad taškų dispersija proporcinga vidurkiui (σ ≈ √(2.2·μ), pvz. 20 taškų žaidėjui σ ≈ 6.6). Kai tikimybė arti 50 %, tikėtini taškai beveik lygūs linijai. Dalis = žaidėjo tikėtini taškai / komandos tikėtini taškai iš tikslaus rezultato modelio.</p>
   </section>
 
   <div id="view-odds" role="tabpanel" aria-labelledby="tab-odds">
@@ -538,7 +542,7 @@ async function setEngine(name) {
   }
   state.engine = name; save();
 }
-function refreshAll() { MARKETS.forEach(m => updateComputed(m.key, true)); renderSummary(); if (state.players) plCompute(); }
+function refreshAll() { MARKETS.forEach(m => updateComputed(m.key, true)); renderSummary(); }
 const SEED = {
   home: "Fenerbahce", away: "Partizan",
   rows: {
@@ -664,6 +668,7 @@ function renderSummary() {
   }
   renderCS(F);
   renderQ(F);
+  if (state.players && $("plRows-home")) plCompute();
   $("summary").innerHTML = cards.join("") || `<div class="kpi"><small>Santrauka</small><b>–</b><span>Įkelkite bent vienos rinkos koeficientus.</span></div>`;
 }
 
@@ -937,9 +942,10 @@ function plPanelHTML(t) {
       <span class="status" id="plStatus-${t}"></span>
     </div>
     <div class="tw"><table class="pltable">
-      <thead><tr><th>Žaidėjas</th><th>Rodiklis</th><th>Linija</th><th>Daugiau</th><th>Mažiau</th><th>P daugiau</th><th>P mažiau</th><th>Teis. daugiau</th><th>Teis. mažiau</th><th>Marža</th><th></th><th></th></tr></thead>
+      <thead><tr><th>Žaidėjas</th><th>Rodiklis</th><th>Linija</th><th>Daugiau</th><th>Mažiau</th><th>P daugiau</th><th>P mažiau</th><th>Teis. daugiau</th><th>Teis. mažiau</th><th>Marža</th><th title="Tikėtini taškai pagal liniją ir koeficientus">Tikėtini t.</th><th title="Dalis tikėtinų komandos taškų">Dalis</th><th></th><th></th></tr></thead>
       <tbody id="plRows-${t}"></tbody>
     </table></div>
+    <div class="plsum" id="plSum-${t}"></div>
   </section>`;
 }
 function plHeads() {
@@ -957,26 +963,51 @@ function renderPlayers() {
         <td><input inputmode="decimal" data-f="l" value="${esc(r.l)}" aria-label="Linija"></td>
         <td><input inputmode="decimal" data-f="a" value="${esc(r.a)}" aria-label="Daugiau koeficientas"></td>
         <td><input inputmode="decimal" data-f="b" value="${esc(r.b)}" aria-label="Mažiau koeficientas"></td>
-        <td class="p pa"></td><td class="p pb"></td><td class="fo fa"></td><td class="fo fb"></td><td class="m"></td>
+        <td class="p pa"></td><td class="p pb"></td><td class="fo fa"></td><td class="fo fb"></td><td class="m"></td><td class="p pm"></td><td class="p psh"></td>
         <td><button class="x" type="button" data-mv="${i}" title="Perkelti į ${esc(teamN(other(t)))}" aria-label="Perkelti į ${esc(teamN(other(t)))}">⇄</button></td>
         <td><button class="x" type="button" data-del="${i}" aria-label="Pašalinti eilutę">×</button></td></tr>`).join("")
-      : `<tr class="empty"><td colspan="12">Dar nėra ${esc(teamN(t))} žaidėjų. Įkelkite nuotrauką ir spauskite „Nuskaityti“, įkelkite CSV arba pridėkite eilutę ranka.</td></tr>`;
+      : `<tr class="empty"><td colspan="14">Dar nėra ${esc(teamN(t))} žaidėjų. Įkelkite nuotrauką ir spauskite „Nuskaityti“, įkelkite CSV arba pridėkite eilutę ranka.</td></tr>`;
   }
   plCompute();
 }
+// Komandos tikėtini taškai: iš tikslaus rezultato modelio, o jei jo nėra, iš tos komandos taškų rinkos.
+function teamMeans() {
+  const F = Object.fromEntries(MARKETS.map(m => [m.key, E.fit(m, state.rows[m.key])]));
+  const SM = E.scoreModel(F);
+  if (SM) return { home: SM.mh, away: SM.ma, src: "tikslaus rezultato modelio" };
+  return { home: F.home ? F.home.mu : null, away: F.away ? F.away.mu : null, src: "komandos taškų rinkos" };
+}
+const f1 = x => x.toFixed(1);
 function plCompute() {
+  const TM = teamMeans();
   for (const t of TEAMS) {
     let n = 0, mSum = 0;
+    const team = TM[t], byPlayer = new Map(); // žaidėjas -> tikėtinų taškų įverčiai (gali būti kelios linijos)
     $("plRows-" + t).querySelectorAll("tr[data-i]").forEach(tr => {
-      const c = E.rowCalc(PL_M, state.players[+tr.dataset.i]);
-      const [pa, pb, fa, fb, mg] = tr.querySelectorAll("td.pa, td.pb, td.fa, td.fb, td.m");
+      const r = state.players[+tr.dataset.i], c = E.rowCalc(PL_M, r);
+      const [pa, pb, fa, fb, mg, pm, psh] = tr.querySelectorAll("td.pa, td.pb, td.fa, td.fb, td.m, td.pm, td.psh");
       pa.textContent = c ? pct(c.pa) : "–"; pb.textContent = c ? pct(c.pb) : "–";
       fa.textContent = c ? (1 / c.pa).toFixed(2) : ""; fb.textContent = c ? (1 / c.pb).toFixed(2) : "";
       mg.textContent = c ? pct(c.margin) : "";
       pa.classList.toggle("fav", !!c && c.pa > c.pb); pb.classList.toggle("fav", !!c && c.pb > c.pa);
+      const mu = c && r.s === "pts" ? playerMean(r.l, c.pa) : null;
+      pm.textContent = mu != null ? f1(mu) : "–";
+      psh.textContent = mu != null && team ? (mu / team * 100).toFixed(1) + "%" : "–";
+      if (mu != null && r.n.trim()) { const k = r.n.trim().toLowerCase(); (byPlayer.get(k) || byPlayer.set(k, []).get(k)).push(mu); }
       if (c) { n++; mSum += c.margin; }
     });
     $("plInfo-" + t).innerHTML = n ? `Eilučių <b>${n}</b> · vid. marža <b>${pct(mSum / n)}</b>` : "";
+    // Suvestinė: kiek komandos taškų tenka išvardytiems žaidėjams ir kiek lieka kitiems.
+    const box = $("plSum-" + t);
+    if (!team) { box.innerHTML = byPlayer.size ? `<p class="note">Dalims apskaičiuoti reikia komandos tikėtinų taškų: įveskite handikapo ir taškų sumos (arba komandų taškų) koeficientus skiltyje „Koeficientai“.</p>` : ""; continue; }
+    if (!byPlayer.size) { box.innerHTML = `<p class="note">${esc(teamN(t))} tikėtini taškai <b class="num">${f1(team)}</b> (iš ${TM.src}). Dalys skaičiuojamos žaidėjų eilutėms su rodikliu „Taškai“.</p>`; continue; }
+    const names = Object.fromEntries(state.players.filter(p => p.t === t).map(p => [p.n.trim().toLowerCase(), p.n.trim()]));
+    const list = [...byPlayer].map(([k, v]) => [names[k] || k, v.reduce((x, y) => x + y, 0) / v.length]).sort((x, y) => y[1] - x[1]);
+    const listed = list.reduce((x, [, v]) => x + v, 0), rest = team - listed;
+    const segs = list.map(([nm, v], i) => `<i style="width:${Math.max(0, v / Math.max(team, listed) * 100)}%;opacity:${1 - (i % 2) * 0.35}" title="${esc(nm)}: ${f1(v)} (${(v / team * 100).toFixed(1)}%)"></i>`).join("");
+    box.innerHTML = `<div class="sharebar">${segs}</div>
+      <p class="note">${esc(teamN(t))} tikėtini taškai <b class="num">${f1(team)}</b> (iš ${TM.src}) · išvardyti žaidėjai <b class="num">${f1(listed)}</b> (${(listed / team * 100).toFixed(1)}%) · ` +
+      (rest >= 0 ? `kiti žaidėjai <b class="num">${f1(rest)}</b> (${(rest / team * 100).toFixed(1)}%)` : `<span class="warnt">žaidėjų suma viršija komandos taškus ${f1(-rest)} t.: linijos ir komandos rinkos nesutampa</span>`) + `</p>`;
   }
 }
 // Naujos eilutės pridedamos; tas pats žaidėjas su tuo pačiu rodikliu ir linija atnaujinamas (ir perkeliamas į nurodytą komandą).

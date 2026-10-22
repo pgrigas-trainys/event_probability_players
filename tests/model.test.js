@@ -114,4 +114,13 @@ assert.equal(M.teamKey("Namų", "", ""), "home", "su lietuviškomis raidėmis");
 assert.equal(M.teamKey("Lakers", "76ers", "Celtics"), null, "nežinoma komanda");
 assert.equal(M.teamKey("Partizan", "", "Partizan"), "away", "tuščias namų pavadinimas netrukdo");
 
+// Žaidėjo tikėtini taškai: atkuriamas žinomas vidurkis iš sugeneruotos tikimybės
+near(M.playerMean(22.5, 0.5), 22.5, 1e-9, "p = 50 % -> vidurkis = linija");
+for (const mu of [12, 14.5, 17, 19]) {
+  const p = 1 - M.Phi((15.5 - mu) / Math.sqrt(M.PLAYER_VAR_K * mu));
+  near(M.playerMean(15.5, p), mu, 0.05, `žaidėjo vidurkis ${mu}`);
+}
+assert.ok(M.playerMean(22.5, 0.55) > 22.5 && M.playerMean(22.5, 0.45) < 22.5, "daugiau tikėtiniau -> vidurkis virš linijos");
+assert.equal(M.playerMean("", 0.5), null);
+
 console.log("Visi skaičiavimų testai praėjo.");
