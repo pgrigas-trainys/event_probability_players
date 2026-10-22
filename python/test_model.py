@@ -112,8 +112,51 @@ def test_joint_model():
     assert m.score_model({"hcp": G["hcp"]}) is None
 
 
+# Dirichlet: etaloninės reikšmės iš app/model.js (tie patys skaičiavimai turi sutapti visose kalbose)
+DIR_TEAM = {"mu": 112, "sd": 11}
+DIR_PLAYERS = [{"id": "pl:home:A", "n": "A", "lines": [{"L": 19.5, "p": 0.651}, {"L": 22.5, "p": 0.508}, {"L": 25.5, "p": 0.392}]},
+               {"id": "pl:home:B", "n": "B", "lines": [{"L": 11.5, "p": 0.533}]}]
+DIR_JS = {"m": [0.2070977326416, 0.11104908068158388], "lo": [0.14272460399021059, 0.06283631332164893],
+          "hi": [0.27574930294633104, 0.16493319915605026], "ptsLo": [15.546219576986005, 6.894471625858387],
+          "ptsHi": [31.507425364915434, 18.71045835651512], "rest": 0.681853186676816, "c_fit": 26.002296531146946}
+
+
+def test_dirichlet():
+    D = m.dirichlet_team(DIR_TEAM, DIR_PLAYERS, 60)
+    for i, p in enumerate(D["players"]):
+        for k in ("m", "lo", "hi", "ptsLo", "ptsHi"):
+            near(p[k], DIR_JS[k][i], 1e-8, f"Dirichlet {k} sutampa su JS")
+    near(D["rest"], DIR_JS["rest"], 1e-8, "likusi dalis sutampa su JS")
+    near(D["players"][1]["lines"][0]["pm"], 0.533, 1e-4, "viena linija atkuriama")
+    near(m.fit_concentration([{"team": DIR_TEAM, "players": DIR_PLAYERS}])["c"], DIR_JS["c_fit"], 1e-4, "c sutampa su JS")
+    assert m.fit_concentration([{"team": DIR_TEAM, "players": DIR_PLAYERS[1:]}]) is None, "viena linija c neįvertina"
+    # Žinomi parametrai (m 0.2, c 60) -> kelių linijų tikimybės -> atkuriami m ir c
+    nodes = m.team_nodes(112, 11)
+    gl = [{"L": L, "p": m.share_p_over(0.2, 60, L, nodes)} for L in (17.5, 20.5, 22.5, 24.5, 27.5)]
+    near(m.fit_share(gl, 60, nodes)[0], 0.2, 1e-4, "dalis iš kelių linijų")
+    near(m.fit_concentration([{"team": {"mu": 112, "sd": 11}, "players": [{"id": "x", "n": "X", "lines": gl}]}])["c"], 60, 0.5, "c iš kelių linijų")
+    # Monte Carlo: žaidėjo P(daugiau) ≈ modelio tikimybė, rezultatas ≈ tinklelis
+    M = m.ScoreModel(mh=112, ma=108, sh=11, sa=11, rho=0.1, src="")
+    teams = {"home": {"c": 60, "players": [{"id": p["id"], "m": p["m"]} for p in D["players"]]}, "away": {"c": 60, "players": []}}
+    near(m.player_condition_probability(M, teams, [("pl:home:A", ">", 22.5)])["p"], D["players"][0]["lines"][1]["pm"], 0.012, "MC P(daugiau) ≈ modelis")
+    near(m.player_condition_probability(M, teams, [("diff", ">", 0)])["p"], m.condition_probability(M, [("diff", ">", 0)]), 0.01, "MC rezultatas ≈ tinklelis")
+    try:
+        m.player_condition_probability(M, teams, [("nera", ">", 1)])
+        raise AssertionError("turėjo būti klaida")
+    except ValueError:
+        pass
+    try:
+        from scipy import stats
+    except ImportError:
+        return
+    for x, a, b in [(0.3, 2, 5), (0.2, 12.4, 47.6), (0.9, 0.7, 3.1)]:
+        near(m.beta_cdf(x, a, b), stats.beta.cdf(x, a, b), 1e-10, f"beta CDF {x}, {a}, {b} prieš SciPy")
+    near(m.beta_quantile(0.9, 12, 48), stats.beta.ppf(0.9, 12, 48), 1e-9, "beta kvantilis prieš SciPy")
+
+
 if __name__ == "__main__":
     F, M = test_model()
     test_joint_model()
     test_against_scipy(F, M)
+    test_dirichlet()
     print("Visi Python testai praėjo.")

@@ -131,6 +131,101 @@ parse_cond <- function(text) {
   list(v = m[2], op = m[3], x = as.numeric(sub(",", ".", m[4])))
 }
 
+# ---------- Dirichlet žaidėjų dalių modelis ----------
+# Komandos taškai T (iš rezultato modelio) dalijami žaidėjams: dalys (S₁…S_k, S_kiti) ~ Dirichlet(c·m₁, …, c·m_k, c·m_kiti),
+# žaidėjo taškai Xᵢ = Sᵢ·T. Vienam žaidėjui Sᵢ ~ Beta(c·mᵢ, c·(1−mᵢ)), nepriklausoma nuo T, todėl
+# P(Xᵢ > linija) = E_T[1 − pbeta(linija/T, c·mᵢ, c·(1−mᵢ))]. mᵢ parenkamas, kad ši tikimybė atitiktų rinką be maržos;
+# c (koncentracija) nustatoma ranka arba įvertinama iš žaidėjų su keliomis linijomis. Tas pats kaip app/model.js.
+team_nodes <- function(mu, sd, n = 41) {
+  z <- -4 + 8 * (seq_len(n) - 1) / (n - 1)
+  t <- mu + z * sd; w <- exp(-z * z / 2)
+  keep <- t > 1
+  list(t = t[keep], w = w[keep] / sum(w[keep]))
+}
+share_p_over <- function(m, c, L, nodes) sum(nodes$w * (1 - pbeta(L / nodes$t, c * m, c * (1 - m))))
+.probit <- function(p) qnorm(pmin(0.995, pmax(0.005, p)))
+.golden <- function(f, lo, hi, it = 60) {
+  r <- (sqrt(5) - 1) / 2
+  x1 <- hi - r * (hi - lo); x2 <- lo + r * (hi - lo); f1 <- f(x1); f2 <- f(x2)
+  for (i in seq_len(it)) {
+    if (f1 < f2) { hi <- x2; x2 <- x1; f2 <- f1; x1 <- hi - r * (hi - lo); f1 <- f(x1) }
+    else { lo <- x1; x1 <- x2; f1 <- f2; x2 <- lo + r * (hi - lo); f2 <- f(x2) }
+  }
+  (lo + hi) / 2
+}
+.bisect <- function(f, lo, hi, it = 60) {
+  for (i in seq_len(it)) { mid <- (lo + hi) / 2; if (f(mid)) hi <- mid else lo <- mid }
+  (lo + hi) / 2
+}
+# lines: sąrašas list(L = linija, p = rinkos P(daugiau)). Grąžina vidutinę dalį m ir paklaidą probit skalėje.
+fit_share <- function(lines, c, nodes) {
+  L <- vapply(lines, function(l) as.numeric(l$L), 0); p <- vapply(lines, function(l) as.numeric(l$p), 0)
+  sse <- function(m) sum((.probit(vapply(L, function(x) share_p_over(m, c, x, nodes), 0)) - .probit(p))^2)
+  m <- exp(.golden(function(u) sse(exp(u)), log(0.002), log(0.9), 45))
+  list(m = m, sse = sse(m))
+}
+.points_quantile <- function(q, m, c, nodes, hi)
+  .bisect(function(x) sum(nodes$w * pbeta(x / nodes$t, c * m, c * (1 - m))) >= q, 0, hi, 40)
+
+# team = list(mu, sd); players = sąrašas list(id, n, lines = list(list(L, p), ...)).
+dirichlet_team <- function(team, players, c) {
+  mu <- as.numeric(team$mu); sd <- as.numeric(team$sd); c <- as.numeric(c)
+  nodes <- team_nodes(mu, sd); hi <- mu + 6 * sd; sse <- 0
+  res <- lapply(players, function(pl) {
+    f <- fit_share(pl$lines, c, nodes); sse <<- sse + f$sse
+    m <- f$m; a <- c * m; b <- c * (1 - m)
+    list(id = pl$id, n = pl$n, m = m, lo = qbeta(0.1, a, b), hi = qbeta(0.9, a, b), mean = m * mu,
+         ptsLo = .points_quantile(0.1, m, c, nodes, hi), ptsHi = .points_quantile(0.9, m, c, nodes, hi),
+         lines = lapply(pl$lines, function(l) list(L = as.numeric(l$L), p = as.numeric(l$p),
+                                                   pm = share_p_over(m, c, as.numeric(l$L), nodes))))
+  })
+  list(c = c, mu = mu, sd = sd, players = res, rest = 1 - sum(vapply(res, function(r) r$m, 0)), sse = sse)
+}
+
+# c, su kuriuo modelis geriausiai atkuria visas linijas (informatyvūs tik žaidėjai su ≥ 2 linijomis); NULL, jei tokių nėra.
+# groups: sąrašas list(team = list(mu, sd), players = ...).
+fit_concentration <- function(groups) {
+  multi <- list()
+  for (g in groups) for (p in g$players) if (length(p$lines) >= 2)
+    multi[[length(multi) + 1]] <- list(nodes = team_nodes(as.numeric(g$team$mu), as.numeric(g$team$sd)), lines = p$lines)
+  if (!length(multi)) return(NULL)
+  obj <- function(c) sum(vapply(multi, function(x) fit_share(x$lines, c, x$nodes)$sse, 0))
+  lo <- log(3); step <- (log(1500) - lo) / 15
+  u <- lo + step * 0:15
+  best <- u[which.min(vapply(u, function(x) obj(exp(x)), 0))]
+  list(c = exp(.golden(function(x) obj(exp(x)), best - step, best + step, 20)), players = length(multi))
+}
+
+# Monte Carlo: rezultatas (dvimatis normalusis) ir žaidėjų taškai (Dirichlet dalys × komandos taškai) kartu.
+# teams = list(home = list(c, players = list(list(id, m), ...)), away = ...); sąlygose v gali būti žaidėjo id.
+player_condition_probability <- function(M, teams, conds, n = 40000, seed = 12345) {
+  set.seed(seed)
+  rho <- max(-0.95, min(0.95, M$rho))
+  z1 <- rnorm(n); z2 <- rnorm(n)
+  H <- pmax(0, round(M$mh + M$sh * z1))
+  A <- pmax(0, round(M$ma + M$sa * (rho * z1 + sqrt(1 - rho^2) * z2)))
+  P <- list()
+  for (t in c("home", "away")) {
+    T <- teams[[t]]; pl <- if (is.null(T)) list() else T$players
+    if (!length(pl)) next
+    cc <- as.numeric(T$c); ms <- vapply(pl, function(p) as.numeric(p$m), 0); tot <- sum(ms)
+    scale <- if (tot > 0.98) 0.98 / tot else 1
+    al <- c(cc * ms * scale, cc * max(0.02, 1 - tot * scale))
+    g <- vapply(al, function(a) rgamma(n, a), numeric(n))
+    g <- g / rowSums(g)
+    pts <- if (t == "home") H else A
+    for (j in seq_along(pl)) P[[pl[[j]]$id]] <- round(g[, j] * pts)
+  }
+  ok <- rep(TRUE, n)
+  for (c in conds) {
+    val <- if (!is.null(VARS[[c$v]])) VARS[[c$v]](H, A) else P[[c$v]]
+    if (is.null(val) || is.null(OPS[[c$op]])) stop("Netinkama sąlyga: ", c$v, " ", c$op)
+    ok <- ok & OPS[[c$op]](val, as.numeric(c$x))
+  }
+  p <- mean(ok)
+  list(p = p, se = sqrt(p * (1 - p) / n))
+}
+
 # ---------- CSV ir komandinė eilutė ----------
 read_rows <- function(path) {
   lines <- readLines(path, encoding = "UTF-8", warn = FALSE)

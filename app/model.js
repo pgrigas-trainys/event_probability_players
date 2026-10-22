@@ -273,7 +273,7 @@ const golden = (f, lo, hi, it = 60) => {
 // lines = [{L, p}] (p = rinkos P(daugiau) be maržos). Grąžina vidutinę dalį m ir paklaidą probit skalėje.
 function fitShare(lines, c, nodes) {
   const sse = m => lines.reduce((s, l) => s + (probit(sharePOver(m, c, l.L, nodes)) - probit(l.p)) ** 2, 0);
-  const m = Math.exp(golden(u => sse(Math.exp(u)), Math.log(0.002), Math.log(0.9)));
+  const m = Math.exp(golden(u => sse(Math.exp(u)), Math.log(0.002), Math.log(0.9), 45));
   return { m, sse: sse(m) };
 }
 const pointsQuantile = (q, m, c, nodes, hi) => {
@@ -300,10 +300,11 @@ function fitConcentration(groups) {
   const multi = groups.flatMap(g => g.players.filter(p => p.lines.length >= 2).map(p => ({ nodes: teamNodes(g.team.mu, g.team.sd), lines: p.lines })));
   if (!multi.length) return null;
   const obj = c => multi.reduce((s, p) => s + fitShare(p.lines, c, p.nodes).sse, 0);
-  let best = Math.log(3), bv = Infinity;
-  for (let i = 0; i <= 24; i++) { const u = Math.log(3) + (Math.log(1500) - Math.log(3)) * i / 24, v = obj(Math.exp(u)); if (v < bv) { bv = v; best = u; } }
-  const step = (Math.log(1500) - Math.log(3)) / 24;
-  return { c: Math.exp(golden(u => obj(Math.exp(u)), best - step, best + step, 30)), players: multi.length };
+  // Paieška log c skalėje: 16 taškų tinklelis [3, 1500], tada auksinis pjūvis aplink geriausią.
+  const lo = Math.log(3), step = (Math.log(1500) - lo) / 15;
+  let best = lo, bv = Infinity;
+  for (let i = 0; i <= 15; i++) { const v = obj(Math.exp(lo + step * i)); if (v < bv) { bv = v; best = lo + step * i; } }
+  return { c: Math.exp(golden(u => obj(Math.exp(u)), best - step, best + step, 20)), players: multi.length };
 }
 
 // ---------- Monte Carlo: rezultatas ir žaidėjų taškai kartu ----------
@@ -337,6 +338,10 @@ function simulateGame(M, teams, n = 40000, seed = 12345) {
   }
   return { n, H, A, P };
 }
+// Vienu kvietimu: simuliacija ir sąlygų tikimybė (tokia pat sąsaja Python ir R varikliuose).
+function playerConditionProbability(M, teams, conds, n = 40000, seed = 12345) {
+  return conditionProbabilityMC(simulateGame(M, teams, n, seed), conds);
+}
 // Sąlygos kaip conditionProbability, papildomai v = žaidėjo id (jo taškai). Grąžina {p, se}.
 function conditionProbabilityMC(sim, conds) {
   const get = v => v === "home" ? i => sim.H[i] : v === "away" ? i => sim.A[i] : v === "total" ? i => sim.H[i] + sim.A[i]
@@ -365,5 +370,5 @@ function teamKey(s, home, away) {
 
 if (typeof module !== "undefined") {
   module.exports = { erf, Phi, PhiInv, rowCalc, fit, pOver, scoreModel, gridCells, conditionProbability, VARS, OPS, parseOddsCSV, STATS, statKey, parsePlayerCSV, teamKey, playerMean, PLAYER_VAR_K,
-    betaCDF, betaQuantile, teamNodes, sharePOver, fitShare, dirichletTeam, fitConcentration, simulateGame, conditionProbabilityMC };
+    betaCDF, betaQuantile, teamNodes, sharePOver, fitShare, dirichletTeam, fitConcentration, simulateGame, conditionProbabilityMC, playerConditionProbability };
 }

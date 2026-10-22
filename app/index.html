@@ -282,7 +282,7 @@ input[type=file] { display: none; }
     </div>
     <div class="plpanels" id="plPanels"></div>
     <p class="note">Tikimybės be bukmekerio maržos (marža paskirstyta proporcingai). Teisingas koeficientas = 1 / tikimybė. Nuskaityti žaidėjai dedami į tos komandos bloką, į kurį įkėlėte nuotrauką, nebent Claude tiksliai žino, kad žaidėjas žaidžia kitoje komandoje. Žaidėją į kitą komandą perkelia mygtukas ⇄. Jei žaidėjas su tuo pačiu rodikliu ir linija jau yra, jo koeficientai atnaujinami. CSV: (komanda), žaidėjas, (rodiklis), linija, daugiau, mažiau. Komanda gali būti „namai“, „svečiai“ arba komandos pavadinimas.</p>
-    <p class="note"><b>Dirichlet modelis.</b> Komandos taškai T imami iš tikslaus rezultato modelio. Juos išvardyti žaidėjai ir „kiti“ dalijasi dalimis (S₁, …, S_k, S_kiti) ~ Dirichlet(c·m₁, …, c·m_k, c·m_kiti), kurių suma visada 100 %; žaidėjo taškai = S·T. Kiekvieno žaidėjo vidutinė dalis m parenkama taip, kad modelio P(daugiau) sutaptų su rinkos tikimybe be maržos (jei linijų kelios – kuo geriau visoms). Koncentracija c nusako, kiek dalys svyruoja: dalies sd = √(m(1−m)/(c+1)), pvz. m 20 %, c 60 -> ±5 proc. p. Iš vienos linijos c įvertinti neįmanoma, todėl ji nustatoma ranka; jei bent vienam žaidėjui įvestos kelios taškų linijos, c galima įvertinti iš jų. Dirichlet modelis visada skaičiuojamas JavaScript'u.</p>
+    <p class="note"><b>Dirichlet modelis.</b> Komandos taškai T imami iš tikslaus rezultato modelio. Juos išvardyti žaidėjai ir „kiti“ dalijasi dalimis (S₁, …, S_k, S_kiti) ~ Dirichlet(c·m₁, …, c·m_k, c·m_kiti), kurių suma visada 100 %; žaidėjo taškai = S·T. Kiekvieno žaidėjo vidutinė dalis m parenkama taip, kad modelio P(daugiau) sutaptų su rinkos tikimybe be maržos (jei linijų kelios – kuo geriau visoms). Koncentracija c nusako, kiek dalys svyruoja: dalies sd = √(m(1−m)/(c+1)), pvz. m 20 %, c 60 -> ±5 proc. p. Iš vienos linijos c įvertinti neįmanoma, todėl ji nustatoma ranka; jei bent vienam žaidėjui įvestos kelios taškų linijos, c galima įvertinti iš jų. Skaičiuoja viršuje pasirinktas variklis (JavaScript, Python arba R); Monte Carlo imtys kiekvienoje kalboje skirtingos, todėl sąlygų su žaidėjais tikimybės tarp kalbų gali skirtis keliomis dešimtosiomis procento.</p>
   </section>
 
   <div id="view-odds" role="tabpanel" aria-labelledby="tab-odds">
@@ -315,7 +315,7 @@ const MARKETS = [
 const KEY = "event-probability-v1";
 
 // ---------- skaičiavimo variklis: JavaScript (model.js) arba Python (model.py per Brython) ----------
-const JS_ENGINE = { rowCalc, fit, pOver, scoreModel, gridCells, conditionProbability };
+const JS_ENGINE = { rowCalc, fit, pOver, scoreModel, gridCells, conditionProbability, dirichletTeam, fitConcentration, playerConditionProbability };
 let E = JS_ENGINE; // keičiama į laiką matuojančią versiją setEngine()
 const BRYTHON = "https://cdn.jsdelivr.net/npm/brython@3.14.3/";
 const PY_BRIDGE = `
@@ -339,6 +339,12 @@ def _bridge(name, args_json):
         return json.dumps(grid_cells(ScoreModel(**a[0])))
     if name == "condition_probability":
         return json.dumps(condition_probability(ScoreModel(**a[0]), [tuple(c) for c in a[1]]))
+    if name == "dirichlet_team":
+        return json.dumps(dirichlet_team(a[0], a[1], a[2]))
+    if name == "fit_concentration":
+        return json.dumps(fit_concentration(a[0]))
+    if name == "player_condition_probability":
+        return json.dumps(player_condition_probability(ScoreModel(**a[0]), a[1], [tuple(c) for c in a[2]], a[3]))
     raise ValueError(name)
 `;
 const numRow = r => { const v = [r.l, r.a, r.b].map(x => parseFloat(String(x).replace(",", "."))); return v.every(isFinite) ? v : null; };
@@ -357,6 +363,9 @@ const PY_ENGINE = {
   scoreModel: F => py("score_model", [F]),
   gridCells: M => py("grid_cells", [M]),
   conditionProbability: (M, conds) => py("condition_probability", [M, conds.map(c => [c.v, c.op, Number(c.x)])]),
+  dirichletTeam: (team, players, c) => py("dirichlet_team", [team, players, c]),
+  fitConcentration: groups => py("fit_concentration", [groups]),
+  playerConditionProbability: (M, teams, conds, n) => py("player_condition_probability", [M, teams, conds.map(c => [c.v, c.op, Number(c.x)]), n]),
 };
 const loadScript = src => new Promise((ok, bad) => { const s = document.createElement("script"); s.src = src; s.onload = ok; s.onerror = () => bad(new Error(src)); document.head.append(s); });
 let pyReady = null, pyKind = "";
@@ -435,6 +444,10 @@ r_bridge <- function(reqs) {
       grid_cells = unname(as.matrix(grid_cells(a[[1]]))),
       condition_probability = condition_probability(a[[1]],
         lapply(a[[2]], function(c) list(v = c[[1]], op = c[[2]], x = c[[3]]))),
+      dirichlet_team = dirichlet_team(a[[1]], a[[2]], a[[3]]),
+      fit_concentration = fit_concentration(a[[1]]),
+      player_condition_probability = player_condition_probability(a[[1]], a[[2]],
+        lapply(a[[3]], function(c) list(v = c[[1]], op = c[[2]], x = c[[3]])), a[[4]]),
       stop("nezinoma funkcija ", name))
   })
   .to_json(out)
@@ -496,6 +509,10 @@ const R_ENGINE = {
   scoreModel: F => rReq("score_model", [F], () => JS_ENGINE.scoreModel(F)),
   gridCells: M => rReq("grid_cells", [M], () => JS_ENGINE.gridCells(M)),
   conditionProbability: (M, conds) => rReq("condition_probability", [M, conds.map(c => [c.v, c.op, Number(c.x)])], () => JS_ENGINE.conditionProbability(M, conds)),
+  dirichletTeam: (team, players, c) => rReq("dirichlet_team", [team, players, c], () => JS_ENGINE.dirichletTeam(team, players, c)),
+  fitConcentration: groups => rReq("fit_concentration", [groups], () => JS_ENGINE.fitConcentration(groups)),
+  playerConditionProbability: (M, teams, conds, n) => rReq("player_condition_probability", [M, teams, conds.map(c => [c.v, c.op, Number(c.x)]), n],
+    () => JS_ENGINE.playerConditionProbability(M, teams, conds, n)),
 };
 
 // Matuojamas laikas atskirai: kiek užtrunka patys skaičiavimai (model.js / model.py), o kiek puslapio piešimas.
@@ -875,7 +892,7 @@ function renderQ(F) {
   if (!conds.length) { $("qP").textContent = "–"; $("qFair").textContent = ""; $("qNote").textContent = "Pridėkite bent vieną sąlygą."; return; }
   // Be žaidėjų: tikslus skaičiavimas iš rezultatų tinklelio. Su žaidėjais: Monte Carlo (rezultatas + Dirichlet dalys kartu).
   let p, mc = null;
-  if (conds.some(c => c.v.startsWith("pl:"))) { mc = conditionProbabilityMC(playerSim(M), conds); p = mc.p; }
+  if (conds.some(c => c.v.startsWith("pl:"))) { mc = E.playerConditionProbability(M, plTeams(), conds, PL_SIMS); p = mc.p; }
   else p = E.conditionProbability(M, conds);
   $("qP").textContent = pct(p);
   $("qFair").textContent = p > 0 ? `Teisingas koeficientas ${(1 / p).toFixed(2)}` : "";
@@ -1020,8 +1037,10 @@ const dirCache = new Map();
 function dirFit(t, TM = teamMeans()) {
   const team = TM[t], players = plTeamInput(t);
   if (!team || !players.length) return null;
-  const key = JSON.stringify([team, players, state.plC]);
-  if (!dirCache.has(key)) { if (dirCache.size > 40) dirCache.clear(); dirCache.set(key, dirichletTeam(team, players, state.plC)); }
+  // R atsakymai ateina vėliau (iki tol JS rezultatas), todėl R rezultatų čia neįsimename: tai daro pats R variklis.
+  if (E === R_T) return E.dirichletTeam(team, players, state.plC);
+  const key = JSON.stringify([E === PY_T ? "py" : "js", team, players, state.plC]);
+  if (!dirCache.has(key)) { if (dirCache.size > 40) dirCache.clear(); dirCache.set(key, E.dirichletTeam(team, players, state.plC)); }
   return dirCache.get(key);
 }
 function playerVars() {
@@ -1030,13 +1049,10 @@ function playerVars() {
   return TEAMS.flatMap(t => (dirFit(t, TM)?.players || []).map(p => [p.id, t]));
 }
 const PL_SIMS = 40000;
-let simKey = "", simVal = null;
-function playerSim(M) {
+// Žaidėjų dalys simuliacijai: {home: {c, players: [{id, m}]}, away: ...}
+function plTeams() {
   const TM = teamMeans();
-  const teams = Object.fromEntries(TEAMS.map(t => { const D = dirFit(t, TM); return [t, { c: state.plC, players: D ? D.players.map(p => ({ id: p.id, m: p.m })) : [] }]; }));
-  const key = JSON.stringify([M.mh, M.ma, M.sh, M.sa, M.rho, teams]);
-  if (key !== simKey) { simKey = key; simVal = simulateGame(M, teams, PL_SIMS); }
-  return simVal;
+  return Object.fromEntries(TEAMS.map(t => { const D = dirFit(t, TM); return [t, { c: state.plC, players: D ? D.players.map(p => ({ id: p.id, m: p.m })) : [] }]; }));
 }
 const f1 = x => x.toFixed(1);
 const pc1 = x => (x * 100).toFixed(1) + "%";
@@ -1184,13 +1200,19 @@ $("plC").addEventListener("input", e => {
   state.plC = c; save(); $("plCInfo").textContent = ""; plCompute();
 });
 $("plCFit").addEventListener("click", () => {
+  // Python ir R skaičiuoja kelias sekundes, todėl pirmiausia parodomas pranešimas.
+  $("plCInfo").className = "status"; $("plCInfo").textContent = "Skaičiuojama…"; $("plCFit").disabled = true;
+  setTimeout(fitC, 30);
+});
+function fitC() {
+  $("plCFit").disabled = false;
   const TM = teamMeans();
   const groups = TEAMS.filter(t => TM[t]).map(t => ({ team: TM[t], players: plTeamInput(t) }));
-  const r = fitConcentration(groups);
+  const r = E.fitConcentration(groups);
   if (!r) { $("plCInfo").className = "status err"; $("plCInfo").textContent = "Reikia bent vieno žaidėjo su keliomis taškų linijomis ir komandos koeficientų."; return; }
   state.plC = Math.round(r.c * 10) / 10; save(); $("plC").value = state.plC; plCompute();
   $("plCInfo").className = "status ok"; $("plCInfo").textContent = `Įvertinta iš ${r.players} žaidėj. kelių linijų: c ≈ ${f1(r.c)}.`;
-});
+}
 $("plCsv").addEventListener("click", () => $("plCsvFile").click());
 $("plCsvFile").addEventListener("change", e => { [...e.target.files].forEach(f => loadPlCSV(f, null)); e.target.value = ""; });
 $("plClearAll").addEventListener("click", () => { clearPlayers(null); plGlobal(""); });

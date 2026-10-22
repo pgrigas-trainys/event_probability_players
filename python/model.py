@@ -218,6 +218,191 @@ def parse_cond(text: str) -> tuple[str, str, float]:
     return m.group(1), m.group(2), float(m.group(3).replace(",", "."))
 
 
+# ---------- Dirichlet žaidėjų dalių modelis ----------
+# Komandos taškai T (iš rezultato modelio) dalijami žaidėjams: dalys (S₁…S_k, S_kiti) ~ Dirichlet(c·m₁, …, c·m_k, c·m_kiti),
+# žaidėjo taškai Xᵢ = Sᵢ·T. Vienam žaidėjui Sᵢ ~ Beta(c·mᵢ, c·(1−mᵢ)), nepriklausoma nuo T, todėl
+# P(Xᵢ > linija) = E_T[1 − I_{linija/T}(c·mᵢ, c·(1−mᵢ))]. mᵢ parenkamas, kad ši tikimybė atitiktų rinką be maržos;
+# c (koncentracija) nustatoma ranka arba įvertinama iš žaidėjų su keliomis linijomis. Tas pats kaip app/model.js.
+def _betacf(a: float, b: float, x: float) -> float:
+    tiny, qab, qap, qam = 1e-300, a + b, a + 1, a - 1
+    c, d = 1.0, 1 - qab * x / qap
+    d = 1 / (d if abs(d) > tiny else tiny)
+    h = d
+    for m in range(1, 301):
+        m2 = 2 * m
+        aa = m * (b - m) * x / ((qam + m2) * (a + m2))
+        d = 1 + aa * d; d = d if abs(d) > tiny else tiny
+        c = 1 + aa / c; c = c if abs(c) > tiny else tiny
+        d = 1 / d; h *= d * c
+        aa = -(a + m) * (qab + m) * x / ((a + m2) * (qap + m2))
+        d = 1 + aa * d; d = d if abs(d) > tiny else tiny
+        c = 1 + aa / c; c = c if abs(c) > tiny else tiny
+        d = 1 / d; delta = d * c; h *= delta
+        if abs(delta - 1) < 1e-13:
+            break
+    return h
+
+
+def beta_cdf(x: float, a: float, b: float) -> float:
+    """Reguliarizuota nepilnoji beta funkcija I_x(a, b)."""
+    if x <= 0:
+        return 0.0
+    if x >= 1:
+        return 1.0
+    bt = math.exp(math.lgamma(a + b) - math.lgamma(a) - math.lgamma(b) + a * math.log(x) + b * math.log(1 - x))
+    return bt * _betacf(a, b, x) / a if x < (a + 1) / (a + b + 2) else 1 - bt * _betacf(b, a, 1 - x) / b
+
+
+def _beta_cdf_many(xs, a: float, b: float) -> list[float]:
+    """beta_cdf daugeliui x. Taškų nedaug (41), todėl paprastas ciklas greitesnis už NumPy."""
+    return [beta_cdf(x, a, b) for x in xs]
+
+
+def _bisect(f, lo: float, hi: float, it: int = 60) -> float:
+    for _ in range(it):
+        mid = (lo + hi) / 2
+        if f(mid):
+            hi = mid
+        else:
+            lo = mid
+    return (lo + hi) / 2
+
+
+def beta_quantile(q: float, a: float, b: float) -> float:
+    return _bisect(lambda x: beta_cdf(x, a, b) >= q, 0.0, 1.0)
+
+
+def team_nodes(mu: float, sd: float, n: int = 41) -> tuple[list[float], list[float]]:
+    """Komandos taškų normalusis skirstinys kaip svoriai taškuose ±4σ: (taškai, svoriai)."""
+    ts, ws = [], []
+    for i in range(n):
+        z = -4 + 8 * i / (n - 1)
+        t = mu + z * sd
+        if t > 1:
+            ts.append(t); ws.append(math.exp(-z * z / 2))
+    tot = sum(ws)
+    return ts, [w / tot for w in ws]
+
+
+def share_p_over(m: float, c: float, L: float, nodes) -> float:
+    ts, ws = nodes
+    cdf = _beta_cdf_many([L / t for t in ts], c * m, c * (1 - m))
+    return float(sum(w * (1 - f) for w, f in zip(ws, cdf)))
+
+
+def _probit(p: float) -> float:
+    return N.inv_cdf(min(0.995, max(0.005, p)))
+
+
+def _golden(f, lo: float, hi: float, it: int = 60) -> float:
+    r = (math.sqrt(5) - 1) / 2
+    x1, x2 = hi - r * (hi - lo), lo + r * (hi - lo)
+    f1, f2 = f(x1), f(x2)
+    for _ in range(it):
+        if f1 < f2:
+            hi, x2, f2 = x2, x1, f1
+            x1 = hi - r * (hi - lo); f1 = f(x1)
+        else:
+            lo, x1, f1 = x1, x2, f2
+            x2 = lo + r * (hi - lo); f2 = f(x2)
+    return (lo + hi) / 2
+
+
+def fit_share(lines: list[dict], c: float, nodes) -> tuple[float, float]:
+    """lines = [{"L": linija, "p": rinkos P(daugiau)}] -> (vidutinė dalis m, paklaida probit skalėje)."""
+    sse = lambda m: sum((_probit(share_p_over(m, c, l["L"], nodes)) - _probit(l["p"])) ** 2 for l in lines)  # noqa: E731
+    m = math.exp(_golden(lambda u: sse(math.exp(u)), math.log(0.002), math.log(0.9), 45))
+    return m, sse(m)
+
+
+def _points_quantile(q: float, m: float, c: float, nodes, hi: float) -> float:
+    ts, ws = nodes
+    a, b = c * m, c * (1 - m)
+    return _bisect(lambda x: sum(w * f for w, f in zip(ws, _beta_cdf_many([x / t for t in ts], a, b))) >= q, 0.0, hi, 40)
+
+
+def dirichlet_team(team: dict, players: list[dict], c: float) -> dict:
+    """team = {"mu", "sd"}; players = [{"id", "n", "lines": [{"L", "p"}]}] -> dalys, intervalai, modelio tikimybės."""
+    nodes = team_nodes(team["mu"], team["sd"])
+    hi = team["mu"] + 6 * team["sd"]
+    res, sse = [], 0.0
+    for pl in players:
+        m, e = fit_share(pl["lines"], c, nodes)
+        sse += e
+        a, b = c * m, c * (1 - m)
+        res.append({"id": pl["id"], "n": pl["n"], "m": m, "lo": beta_quantile(0.1, a, b), "hi": beta_quantile(0.9, a, b),
+                    "mean": m * team["mu"], "ptsLo": _points_quantile(0.1, m, c, nodes, hi),
+                    "ptsHi": _points_quantile(0.9, m, c, nodes, hi),
+                    "lines": [{"L": l["L"], "p": l["p"], "pm": share_p_over(m, c, l["L"], nodes)} for l in pl["lines"]]})
+    return {"c": c, "mu": team["mu"], "sd": team["sd"], "players": res, "rest": 1 - sum(r["m"] for r in res), "sse": sse}
+
+
+def fit_concentration(groups: list[dict]) -> dict | None:
+    """c, su kuriuo modelis geriausiai atkuria visas linijas (informatyvūs tik žaidėjai su ≥ 2 linijomis)."""
+    multi = [(team_nodes(g["team"]["mu"], g["team"]["sd"]), p["lines"]) for g in groups for p in g["players"] if len(p["lines"]) >= 2]
+    if not multi:
+        return None
+    obj = lambda c: sum(fit_share(lines, c, nodes)[1] for nodes, lines in multi)  # noqa: E731
+    lo, step = math.log(3), (math.log(1500) - math.log(3)) / 15
+    best = min((lo + step * i for i in range(16)), key=lambda u: obj(math.exp(u)))
+    return {"c": math.exp(_golden(lambda u: obj(math.exp(u)), best - step, best + step, 20)), "players": len(multi)}
+
+
+def player_condition_probability(M: ScoreModel, teams: dict, conds: list[tuple[str, str, float]],
+                                 n: int = 40000, seed: int = 12345) -> dict:
+    """Monte Carlo: rezultatas (dvimatis normalusis) ir žaidėjų taškai (Dirichlet dalys × komandos taškai) kartu.
+    teams = {"home": {"c", "players": [{"id", "m"}]}, "away": {...}}; sąlygose v gali būti žaidėjo id. -> {"p", "se"}."""
+    rho = max(-0.95, min(0.95, M.rho))
+    alphas = {}
+    for t in ("home", "away"):
+        T = teams.get(t) or {"c": 1, "players": []}
+        ms = [p["m"] for p in T["players"]]
+        tot = sum(ms)
+        scale = 0.98 / tot if tot > 0.98 else 1.0
+        alphas[t] = ([p["id"] for p in T["players"]], [T["c"] * m * scale for m in ms] + [T["c"] * max(0.02, 1 - tot * scale)])
+    for v, op, _ in conds:
+        if op not in OPS or (v not in VARS and not any(v in ids for ids, _ in alphas.values())):
+            raise ValueError(f"Netinkama sąlyga: {v} {op}")
+    if np is not None:
+        rng = np.random.default_rng(seed)
+        z1, z2 = rng.standard_normal(n), rng.standard_normal(n)
+        H = np.maximum(0, np.rint(M.mh + M.sh * z1))
+        A = np.maximum(0, np.rint(M.ma + M.sa * (rho * z1 + math.sqrt(1 - rho * rho) * z2)))
+        P = {}
+        for t, T in (("home", H), ("away", A)):
+            ids, al = alphas[t]
+            if ids:
+                g = np.stack([rng.gamma(a, size=n) for a in al])
+                g /= g.sum(axis=0)
+                for j, pid in enumerate(ids):
+                    P[pid] = np.rint(g[j] * T)
+        get = lambda v: VARS[v](H, A) if v in VARS else P[v]  # noqa: E731
+        mask = np.ones(n, dtype=bool)
+        for v, op, x in conds:
+            mask &= OPS[op](get(v), x)
+        p = float(mask.mean())
+    else:  # be NumPy (Brython): paprasti ciklai
+        import random
+        rnd = random.Random(seed)
+        k = 0
+        for _ in range(n):
+            z1, z2 = rnd.gauss(0, 1), rnd.gauss(0, 1)
+            h = max(0, round(M.mh + M.sh * z1))
+            a = max(0, round(M.ma + M.sa * (rho * z1 + math.sqrt(1 - rho * rho) * z2)))
+            vals = {"home": h, "away": a, "total": h + a, "diff": h - a}
+            for t, T in (("home", h), ("away", a)):
+                ids, al = alphas[t]
+                if ids:
+                    g = [rnd.gammavariate(x, 1) for x in al]
+                    s = sum(g)
+                    for j, pid in enumerate(ids):
+                        vals[pid] = round(g[j] / s * T)
+            if all(OPS[op](vals[v], x) for v, op, x in conds):
+                k += 1
+        p = k / n
+    return {"p": p, "se": math.sqrt(p * (1 - p) / n)}
+
+
 # ---------- CSV ir komandinė eilutė ----------
 def read_rows(path: str) -> list[tuple[float, float, float]]:
     out = []
