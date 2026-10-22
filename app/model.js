@@ -182,25 +182,42 @@ const statKey = s => STATS.find(([, , re]) => re.test(String(s || "").trim()))?.
 function parsePlayerCSV(text) {
   const { lines, split, num } = csvReader(text);
   if (!lines.length) return { rows: [], count: 0 };
-  let nameCol = -1, statCol = -1, start = 0;
+  let nameCol = -1, statCol = -1, teamCol = -1, start = 0;
   const first = split(lines[0]);
   if (first.filter(c => isFinite(num(c))).length < 3) {
     start = 1;
     nameCol = first.findIndex(c => /^(player|žaidėjas|zaidejas|žaidėjai|vardas|name)$/i.test(c));
     statCol = first.findIndex(c => /^(stat|rodiklis|market|rinka|tipas|type)$/i.test(c));
+    teamCol = first.findIndex(c => /^(team|komanda|side|pusė|puse)$/i.test(c));
   }
   const rows = [];
   for (const line of lines.slice(start)) {
     const cells = split(line);
-    const nums = cells.filter((c, i) => i !== nameCol && i !== statCol).map(num).filter(Number.isFinite);
+    const skip = i => i === nameCol || i === statCol || i === teamCol;
+    const nums = cells.filter((c, i) => !skip(i)).map(num).filter(Number.isFinite);
     if (nums.length < 3) continue;
-    const name = nameCol >= 0 ? cells[nameCol] : cells.find((c, i) => i !== statCol && c && !isFinite(num(c)));
+    const name = nameCol >= 0 ? cells[nameCol] : cells.find((c, i) => !skip(i) && c && !isFinite(num(c)));
     if (!name) continue;
-    rows.push({ n: name, s: statCol >= 0 ? statKey(cells[statCol]) : null, l: String(nums[0]), a: nums[1].toFixed(2), b: nums[2].toFixed(2) });
+    rows.push({ n: name, s: statCol >= 0 ? statKey(cells[statCol]) : null, tm: teamCol >= 0 ? cells[teamCol] || "" : "",
+      l: String(nums[0]), a: nums[1].toFixed(2), b: nums[2].toFixed(2) });
   }
   return { rows, count: rows.length };
 }
 
+// Komanda iš teksto: „namai“/„svečiai“ (home/away) arba komandos pavadinimas; null, jei neaišku.
+const normTxt = s => String(s || "").trim().toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+function teamKey(s, home, away) {
+  const v = normTxt(s);
+  if (!v) return null;
+  if (/^(home|namai|namu|namu komanda|team ?1|1|h)$/.test(v)) return "home";
+  if (/^(away|sveciai|sveciu|sveciu komanda|team ?2|2|a)$/.test(v)) return "away";
+  const h = normTxt(home), a = normTxt(away);
+  const hit = t => t && (t === v || t.includes(v) || v.includes(t));
+  if (hit(h) && !hit(a)) return "home";
+  if (hit(a) && !hit(h)) return "away";
+  return null;
+}
+
 if (typeof module !== "undefined") {
-  module.exports = { erf, Phi, PhiInv, rowCalc, fit, pOver, scoreModel, gridCells, conditionProbability, VARS, OPS, parseOddsCSV, STATS, statKey, parsePlayerCSV };
+  module.exports = { erf, Phi, PhiInv, rowCalc, fit, pOver, scoreModel, gridCells, conditionProbability, VARS, OPS, parseOddsCSV, STATS, statKey, parsePlayerCSV, teamKey };
 }

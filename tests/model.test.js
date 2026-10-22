@@ -98,12 +98,20 @@ assert.equal(combo.count, 4, "eilutės be skaičių praleidžiamos");
 const pl = M.parsePlayerCSV(["Žaidėjas;Linija;Daugiau;Mažiau", "Tyrese Maxey;22,5;1,80;1,86", "Joel Embiid;22,5;1,90;1,76",
   "VJ Edgecombe;11,5;1,71;1,95"].join("\n"));
 assert.equal(pl.count, 3, "žaidėjai: kabliataškis");
-assert.deepEqual(pl.rows[0], { n: "Tyrese Maxey", s: null, l: "22.5", a: "1.80", b: "1.86" });
 const plStat = M.parsePlayerCSV("player,stat,line,over,under\nLeBron James,Rebounds,7.5,1.85,1.85\nJaylen Brown,taškai,20.5,1.86,1.80\n");
 assert.equal(plStat.rows[0].s, "reb"); assert.equal(plStat.rows[1].s, "pts");
 const plNoHead = M.parsePlayerCSV("LeBron James,15.5,1.86,1.80\nbe skaičių\n");
-assert.deepEqual(plNoHead.rows, [{ n: "LeBron James", s: null, l: "15.5", a: "1.86", b: "1.80" }], "be antraštės");
+assert.deepEqual(plNoHead.rows, [{ n: "LeBron James", s: null, tm: "", l: "15.5", a: "1.86", b: "1.80" }], "be antraštės");
 const maxey = M.rowCalc(TOT, pl.rows[0]);
 near(maxey.pa, (1 / 1.80) / (1 / 1.80 + 1 / 1.86), 1e-12, "Maxey daugiau be maržos");
+
+assert.deepEqual(pl.rows[0], { n: "Tyrese Maxey", s: null, tm: "", l: "22.5", a: "1.80", b: "1.86" }, "be komandos stulpelio");
+const plTeam = M.parsePlayerCSV("komanda,žaidėjas,linija,daugiau,mažiau\nPhiladelphia 76ers,Tyrese Maxey,22.5,1.80,1.86\nsvečiai,Jaylen Brown,20.5,1.86,1.80\n");
+assert.equal(plTeam.rows[0].tm, "Philadelphia 76ers");
+assert.equal(M.teamKey(plTeam.rows[0].tm, "76ers", "Celtics"), "home", "komanda pagal pavadinimą");
+assert.equal(M.teamKey(plTeam.rows[1].tm, "76ers", "Celtics"), "away", "svečiai");
+assert.equal(M.teamKey("Namų", "", ""), "home", "su lietuviškomis raidėmis");
+assert.equal(M.teamKey("Lakers", "76ers", "Celtics"), null, "nežinoma komanda");
+assert.equal(M.teamKey("Partizan", "", "Partizan"), "away", "tuščias namų pavadinimas netrukdo");
 
 console.log("Visi skaičiavimų testai praėjo.");
