@@ -94,4 +94,16 @@ assert.equal(combo.byMarket.hcp.length, 1); assert.equal(combo.byMarket.tot.leng
 assert.equal(combo.byMarket.home.length, 1); assert.equal(combo.byMarket.away.length, 1);
 assert.equal(combo.count, 4, "eilutės be skaičių praleidžiamos");
 
+// Žaidėjų koeficientai
+const pl = M.parsePlayerCSV(["Žaidėjas;Linija;Daugiau;Mažiau", "Tyrese Maxey;22,5;1,80;1,86", "Joel Embiid;22,5;1,90;1,76",
+  "VJ Edgecombe;11,5;1,71;1,95"].join("\n"));
+assert.equal(pl.count, 3, "žaidėjai: kabliataškis");
+assert.deepEqual(pl.rows[0], { n: "Tyrese Maxey", s: null, l: "22.5", a: "1.80", b: "1.86" });
+const plStat = M.parsePlayerCSV("player,stat,line,over,under\nLeBron James,Rebounds,7.5,1.85,1.85\nJaylen Brown,taškai,20.5,1.86,1.80\n");
+assert.equal(plStat.rows[0].s, "reb"); assert.equal(plStat.rows[1].s, "pts");
+const plNoHead = M.parsePlayerCSV("LeBron James,15.5,1.86,1.80\nbe skaičių\n");
+assert.deepEqual(plNoHead.rows, [{ n: "LeBron James", s: null, l: "15.5", a: "1.86", b: "1.80" }], "be antraštės");
+const maxey = M.rowCalc(TOT, pl.rows[0]);
+near(maxey.pa, (1 / 1.80) / (1 / 1.80 + 1 / 1.86), 1e-12, "Maxey daugiau be maržos");
+
 console.log("Visi skaičiavimų testai praėjo.");

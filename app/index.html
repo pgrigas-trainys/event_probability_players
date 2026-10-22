@@ -109,7 +109,15 @@ td .x:hover { color: var(--bad); }
 .calc output b { font-family: var(--f-mono); font-weight: 500; }
 input[type=file] { display: none; }
 [hidden] { display: none !important; }
-#view-cs, #view-odds, #view-q { display: flex; flex-direction: column; gap: 14px; }
+#view-cs, #view-odds, #view-q, #view-pl { display: flex; flex-direction: column; gap: 14px; }
+.pltable td input.name { width: 20ch; text-align: left; font-family: var(--f-body); }
+.pltable td select { font: inherit; font-size: .8rem; padding: 3px 4px; border: 1px solid transparent; border-radius: 4px; background: transparent; color: var(--fg); }
+.pltable td select:hover { border-color: var(--line); }
+.pltable td.p { color: var(--fg); }
+.pltable td.fo { font-family: var(--f-mono); font-size: .8rem; color: var(--muted); }
+.pltable td.fav { font-weight: 600; color: var(--accent); }
+.pltools { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; font-size: .82rem; color: var(--muted); }
+.pltools select { font: inherit; font-size: .82rem; padding: 4px 6px; border: 1px solid var(--line); border-radius: 5px; background: var(--surface); color: var(--fg); }
 .tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--line); flex-wrap: wrap; }
 .tabs button { border: 0; background: transparent; padding: 8px 14px 9px; font-family: var(--f-display); font-size: 1.1rem; font-weight: 600;
   text-transform: uppercase; letter-spacing: .04em; color: var(--muted); border-bottom: 3px solid transparent; margin-bottom: -1px; }
@@ -195,6 +203,7 @@ input[type=file] { display: none; }
     <button type="button" role="tab" id="tab-odds" aria-controls="view-odds" aria-selected="true">Koeficientai</button>
     <button type="button" role="tab" id="tab-cs" aria-controls="view-cs" aria-selected="false">Tikslus rezultatas</button>
     <button type="button" role="tab" id="tab-q" aria-controls="view-q" aria-selected="false">Sąlygos</button>
+    <button type="button" role="tab" id="tab-pl" aria-controls="view-pl" aria-selected="false">Žaidėjai</button>
   </nav>
 
   <section class="summary" id="summary" aria-live="polite"></section>
@@ -241,6 +250,30 @@ input[type=file] { display: none; }
       </div>
     </div>
     <p class="note">Įrašykite sąlygą žodžiais ir Claude ją paverčia sąlygų sąrašu. Sąlygas galite pataisyti ar pridėti ranka. Visos sąlygos turi išsipildyti kartu. Skaičiuojama iš to paties modelio kaip tikslaus rezultato lenta, pagrindinio laiko rezultatui: lygiosios (po kurių būna pratęsimas) nelaikomos nė vienos komandos pergale.</p>
+  </section>
+
+  <section id="view-pl" role="tabpanel" aria-labelledby="tab-pl" hidden>
+    <div class="panel">
+      <div class="phead"><h2>Žaidėjų koeficientai</h2><span class="fit" id="plInfo"></span></div>
+      <div class="drop" tabindex="0" role="button" aria-label="Pridėti nuotrauką: žaidėjų koeficientai" id="plDrop">
+        <div id="plThumbs" style="display:contents"></div>
+        <span class="hint"><b>Įklijuokite</b> nuotrauką (Ctrl+V), nutempkite nuotrauką ar <b>CSV</b> failą arba spustelėkite, kad pasirinktumėte</span>
+        <input type="file" accept="image/*,.csv,text/csv,text/plain" multiple id="plFile">
+      </div>
+      <div class="pacts pltools">
+        <label for="plStat">Nuotraukoje</label>
+        <select id="plStat"></select>
+        <button class="btn small scan" type="button" id="plScan">Nuskaityti</button>
+        <button class="btn small" type="button" id="plAdd">+ Eilutė</button>
+        <button class="btn small" type="button" id="plClear">Išvalyti</button>
+        <span class="status" id="plStatus"></span>
+      </div>
+      <div class="tw"><table class="pltable">
+        <thead><tr><th>Žaidėjas</th><th>Rodiklis</th><th>Linija</th><th>Daugiau</th><th>Mažiau</th><th>P daugiau</th><th>P mažiau</th><th>Teis. daugiau</th><th>Teis. mažiau</th><th>Marža</th><th></th></tr></thead>
+        <tbody id="plRows"></tbody>
+      </table></div>
+    </div>
+    <p class="note">Tikimybės be bukmekerio maržos (marža paskirstyta proporcingai). Teisingas koeficientas = 1 / tikimybė. Nauji nuskaityti žaidėjai pridedami prie sąrašo: jei žaidėjas su tuo pačiu rodikliu ir linija jau yra, jo koeficientai atnaujinami. CSV: žaidėjas, (rodiklis), linija, daugiau, mažiau.</p>
   </section>
 
   <div id="view-odds" role="tabpanel" aria-labelledby="tab-odds">
@@ -490,7 +523,7 @@ async function setEngine(name) {
       E = JS_T; refreshAll();
       document.querySelectorAll("#engine button").forEach(b => b.setAttribute("aria-pressed", b.dataset.eng === "js"));
       st.className = "status err";
-      st.textContent = "R čia neveikia: jo failas per didelis Claude programai. R veikia GitHub Pages versijoje: pgrigas-trainys.github.io/event_probability";
+      st.textContent = "R čia neveikia: jo failas per didelis Claude programai. R veikia GitHub Pages versijoje: pgrigas-trainys.github.io/event_probability_players";
       return;
     }
     st.className = "status"; st.textContent = "Kraunamas R (pirmą kartą ~30 MB)…";
@@ -514,7 +547,7 @@ async function setEngine(name) {
   }
   state.engine = name; save();
 }
-function refreshAll() { MARKETS.forEach(m => updateComputed(m.key, true)); renderSummary(); }
+function refreshAll() { MARKETS.forEach(m => updateComputed(m.key, true)); renderSummary(); if (state.players) plCompute(); }
 const SEED = {
   home: "Fenerbahce", away: "Partizan",
   rows: {
@@ -752,6 +785,7 @@ function disableScan(msg) {
   document.querySelectorAll(".scan, #scanAll").forEach(b => b.hidden = true);
   $("globalNote").textContent = msg + " Koeficientus galite įkelti iš CSV failo arba įvesti ranka mygtuku „+ Eilutė“.";
   $("globalNote").classList.add("warn");
+  $("plStatus").className = "status"; $("plStatus").textContent = msg + " Žaidėjų koeficientus galite įkelti iš CSV failo arba įvesti ranka.";
 }
 
 // ---------- correct score ----------
@@ -880,23 +914,145 @@ $("qText").value = state.q || "";
 renderConds();
 $("qForm").hidden = true; $("qStatus").textContent = "";
 
+// ---------- žaidėjai ----------
+// Kiekviena eilutė yra atskira daugiau/mažiau rinka: tikimybės be maržos skaičiuojamos taip pat kaip sumoms.
+const PL_M = { key: "tot", sigma0: 16 };
+state.players ||= [];
+if (!STATS.some(([k]) => k === state.plStat)) state.plStat = "pts";
+const plImages = []; // {file, url}
+const statOpts = s => STATS.map(([k, t]) => `<option value="${k}"${k === s ? " selected" : ""}>${esc(t)}</option>`).join("");
+$("plStat").innerHTML = statOpts(state.plStat);
+const plStatus = (text, cls = "") => { $("plStatus").textContent = text; $("plStatus").className = "status " + cls; };
+
+function renderPlayers() {
+  const rows = state.players;
+  $("plRows").innerHTML = rows.length ? rows.map((r, i) => `<tr data-i="${i}">
+      <td><input class="name" data-f="n" value="${esc(r.n)}" aria-label="Žaidėjas"></td>
+      <td><select data-f="s" aria-label="Rodiklis">${statOpts(r.s)}</select></td>
+      <td><input inputmode="decimal" data-f="l" value="${esc(r.l)}" aria-label="Linija"></td>
+      <td><input inputmode="decimal" data-f="a" value="${esc(r.a)}" aria-label="Daugiau koeficientas"></td>
+      <td><input inputmode="decimal" data-f="b" value="${esc(r.b)}" aria-label="Mažiau koeficientas"></td>
+      <td class="p pa"></td><td class="p pb"></td><td class="fo fa"></td><td class="fo fb"></td><td class="m"></td>
+      <td><button class="x" type="button" data-del="${i}" aria-label="Pašalinti eilutę">×</button></td></tr>`).join("")
+    : `<tr class="empty"><td colspan="11">Dar nėra žaidėjų koeficientų. Įkelkite nuotrauką ir spauskite „Nuskaityti“, įkelkite CSV arba pridėkite eilutę ranka.</td></tr>`;
+  plCompute();
+}
+function plCompute() {
+  let n = 0, mSum = 0;
+  $("plRows").querySelectorAll("tr[data-i]").forEach(tr => {
+    const c = E.rowCalc(PL_M, state.players[+tr.dataset.i]);
+    const [pa, pb, fa, fb, mg] = tr.querySelectorAll("td.pa, td.pb, td.fa, td.fb, td.m");
+    pa.textContent = c ? pct(c.pa) : "–"; pb.textContent = c ? pct(c.pb) : "–";
+    fa.textContent = c ? (1 / c.pa).toFixed(2) : ""; fb.textContent = c ? (1 / c.pb).toFixed(2) : "";
+    mg.textContent = c ? pct(c.margin) : "";
+    pa.classList.toggle("fav", !!c && c.pa > c.pb); pb.classList.toggle("fav", !!c && c.pb > c.pa);
+    if (c) { n++; mSum += c.margin; }
+  });
+  $("plInfo").innerHTML = n ? `Eilučių <b>${n}</b> · vid. marža <b>${pct(mSum / n)}</b>` : "";
+}
+// Naujos eilutės pridedamos; tas pats žaidėjas su tuo pačiu rodikliu ir linija atnaujinamas.
+function mergePlayers(rows) {
+  let added = 0, updated = 0;
+  for (const r of rows) {
+    const row = { n: r.n, s: r.s || state.plStat, l: r.l, a: r.a, b: r.b };
+    const i = state.players.findIndex(p => p.n.trim().toLowerCase() === row.n.trim().toLowerCase() && p.s === row.s && parseFloat(p.l) === parseFloat(row.l));
+    if (i >= 0) { state.players[i] = row; updated++; } else { state.players.push(row); added++; }
+  }
+  save(); renderPlayers();
+  return `pridėta ${added}` + (updated ? `, atnaujinta ${updated}` : "") + " eil.";
+}
+function renderPlThumbs() {
+  $("plThumbs").innerHTML = plImages.map((im, i) =>
+    `<div class="thumb"><img src="${im.url}" alt="Nuotrauka ${i + 1}"><button type="button" data-plrm="${i}" aria-label="Pašalinti nuotrauką">×</button></div>`).join("");
+}
+function addPlFiles(files) {
+  files = [...files];
+  files.filter(isCSV).forEach(loadPlCSV);
+  const imgs = files.filter(f => f && f.type && f.type.startsWith("image/"));
+  if (!imgs.length) return;
+  for (const f of imgs) plImages.push({ file: f, url: URL.createObjectURL(f) });
+  renderPlThumbs();
+  plStatus(`${plImages.length} nuotr. paruošta. Spauskite „Nuskaityti“.`);
+}
+async function loadPlCSV(file) {
+  let res;
+  try { res = parsePlayerCSV(await file.text()); } catch (e) { res = { count: 0 }; }
+  if (!res.count) { plStatus(`${file.name}: nerasta eilučių su žaidėju, linija ir dviem koeficientais.`, "err"); return; }
+  plStatus(`${file.name}: ${mergePlayers(res.rows)}`, "ok");
+}
+async function scanPlayers() {
+  if (!sample) return;
+  if (!plImages.length) { plStatus("Pirmiausia įkelkite nuotrauką.", "err"); return; }
+  const btn = $("plScan");
+  btn.disabled = true; plStatus("Skaitoma… (gali užtrukti iki minutės)");
+  const prompt = `These are screenshots from a sports betting website (Lithuanian, e.g. Betsson or Topsport) showing basketball PLAYER prop markets (over/under, "Daugiau/Mažiau").
+Each row has a player name, a line ("Linija"), decimal odds for OVER ("Daugiau") and decimal odds for UNDER ("Mažiau").
+Read every row visible in the images. Use player names and decimal odds exactly as printed. Skip a row if one side's odds are not visible. Do not invent numbers. Remove duplicates.
+If a heading shows which statistic the rows are about, set "stat" to one of: "pts" (points), "reb" (rebounds), "ast" (assists), "3pm" (three-pointers made), "pra" (points + rebounds + assists), "other". If no heading says so, use null.
+Reply with only JSON in this shape: {"rows": [{"player": "Tyrese Maxey", "stat": null, "line": 22.5, "over": 1.80, "under": 1.86}]}`;
+  try {
+    const res = await sample.json(prompt, { images: plImages.slice(0, maxImgs).map(x => x.file) });
+    const rows = (res && Array.isArray(res.rows) ? res.rows : [])
+      .map(r => ({ n: String(r.player || "").trim(), s: STATS.some(([k]) => k === r.stat) ? r.stat : null, l: Number(r.line), a: Number(r.over), b: Number(r.under) }))
+      .filter(r => r.n && isFinite(r.l) && r.a > 1 && r.b > 1)
+      .map(r => ({ ...r, l: String(r.l), a: r.a.toFixed(2), b: r.b.toFixed(2) }));
+    if (!rows.length) { plStatus("Nuotraukoje nerasta žaidėjų koeficientų.", "err"); return; }
+    plStatus(`Nuskaityta: ${mergePlayers(rows)} Patikrinkite skaičius.` + (plImages.length > maxImgs ? ` Nuskaitytos pirmos ${maxImgs} nuotraukos iš ${plImages.length}.` : ""), "ok");
+  } catch (e) {
+    if (e && e.code === "cancelled") plStatus("");
+    else plStatus(ERR[e && e.code] || "Nepavyko nuskaityti. Bandykite dar kartą.", "err");
+    if (e && (e.code === "not_granted" || e.code === "sampling_disabled")) disableScan(ERR[e.code]);
+  } finally { btn.disabled = false; }
+}
+$("plDrop").addEventListener("click", e => {
+  const rm = e.target.closest("[data-plrm]");
+  if (rm) { const i = +rm.dataset.plrm; URL.revokeObjectURL(plImages[i].url); plImages.splice(i, 1); renderPlThumbs(); plStatus(""); return; }
+  if (e.target.tagName !== "INPUT") $("plFile").click();
+});
+$("plDrop").addEventListener("keydown", e => { if (e.target === $("plDrop") && (e.key === "Enter" || e.key === " ")) { e.preventDefault(); $("plFile").click(); } });
+$("plFile").addEventListener("change", e => { addPlFiles(e.target.files); e.target.value = ""; });
+$("plDrop").addEventListener("dragover", e => { e.preventDefault(); $("plDrop").classList.add("over"); });
+$("plDrop").addEventListener("dragleave", () => $("plDrop").classList.remove("over"));
+$("plDrop").addEventListener("drop", e => { e.preventDefault(); $("plDrop").classList.remove("over"); addPlFiles(e.dataTransfer.files); });
+$("plStat").addEventListener("change", e => { state.plStat = e.target.value; save(); });
+$("plScan").addEventListener("click", scanPlayers);
+$("plAdd").addEventListener("click", () => {
+  state.players.push({ n: "", s: state.plStat, l: "", a: "", b: "" }); save(); renderPlayers();
+  $("plRows").querySelector("tr:last-child input")?.focus();
+});
+$("plClear").addEventListener("click", () => {
+  state.players = []; plImages.forEach(x => URL.revokeObjectURL(x.url)); plImages.length = 0;
+  save(); renderPlayers(); renderPlThumbs(); plStatus("");
+});
+$("plRows").addEventListener("input", e => {
+  const tr = e.target.closest("tr[data-i]"), f = e.target.dataset.f;
+  if (!tr || !f) return;
+  state.players[+tr.dataset.i][f] = e.target.value; save();
+  if (f !== "n" && f !== "s") plCompute();
+});
+$("plRows").addEventListener("click", e => {
+  const b = e.target.closest("[data-del]"); if (!b) return;
+  state.players.splice(+b.dataset.del, 1); save(); renderPlayers();
+});
+renderPlayers();
+
 function setTab(t) {
   state.tab = t; save();
-  $("tab-odds").setAttribute("aria-selected", t === "odds"); $("tab-cs").setAttribute("aria-selected", t === "cs"); $("tab-q").setAttribute("aria-selected", t === "q");
-  $("view-odds").hidden = t !== "odds"; $("view-cs").hidden = t !== "cs"; $("view-q").hidden = t !== "q";
+  for (const k of ["odds", "cs", "q", "pl"]) { $("tab-" + k).setAttribute("aria-selected", t === k); $("view-" + k).hidden = t !== k; }
   if (t === "q") { renderConds(); renderExamples(); }
   if (t === "cs") centerTop();
 }
 $("tab-odds").addEventListener("click", () => setTab("odds"));
 $("tab-cs").addEventListener("click", () => setTab("cs"));
 $("tab-q").addEventListener("click", () => setTab("q"));
+$("tab-pl").addEventListener("click", () => setTab("pl"));
 $("csStep").addEventListener("click", e => { const b = e.target.closest("button"); if (!b) return; state.csStep = +b.dataset.step; save(); renderSummary(); });
 
 // ---------- events ----------
 $("markets").innerHTML = MARKETS.map(panelHTML).join("");
 $("homeName").value = state.home || ""; $("awayName").value = state.away || "";
 MARKETS.forEach(m => { renderRows(m.key); renderThumbs(m.key); });
-setTab(["cs", "q"].includes(state.tab) ? state.tab : "odds");
+setTab(["cs", "q", "pl"].includes(state.tab) ? state.tab : "odds");
 $("engine").addEventListener("click", e => { const b = e.target.closest("[data-eng]"); if (b) setEngine(b.dataset.eng); });
 if (state.engine === "py" || state.engine === "r") setEngine(state.engine);
 
@@ -943,7 +1099,8 @@ markets.addEventListener("drop", e => {
 document.addEventListener("paste", e => {
   const files = [...(e.clipboardData?.items || [])].filter(i => i.kind === "file" && i.type.startsWith("image/")).map(i => i.getAsFile());
   if (!files.length) return;
-  e.preventDefault(); addImages(active, files);
+  e.preventDefault();
+  if (state.tab === "pl") addPlFiles(files); else addImages(active, files);
 });
 $("scanAll").addEventListener("click", async () => {
   const keys = MARKETS.map(m => m.key).filter(k => images[k].length);

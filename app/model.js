@@ -133,14 +133,20 @@ const MARKET_ALIASES = [
   ["home", /^(home|namai|namų|namu|namų komandos|team1|1)/i],
   ["away", /^(away|svečiai|sveciai|svečių|veciu|team2|2)/i],
 ];
-function parseOddsCSV(text) {
+// Bendra CSV pagalba: eilutės, skirtukas (, ; arba tab), langelių skaidymas ir skaičių atpažinimas.
+function csvReader(text) {
   const lines = String(text).replace(/^﻿/, "").split(/\r?\n/).filter(l => l.trim());
-  if (!lines.length) return { byMarket: {}, unassigned: [], count: 0 };
-  const head = lines[0];
+  const head = lines[0] || "";
   const delim = [["\t", (head.match(/\t/g) || []).length], [";", (head.match(/;/g) || []).length], [",", (head.match(/,/g) || []).length]]
     .sort((x, y) => y[1] - x[1])[0][0];
   const split = l => l.split(delim).map(c => c.trim().replace(/^"(.*)"$/, "$1").trim());
   const num = c => { const v = delim === "," ? c : c.replace(",", "."); return /^[-+]?\d+(\.\d+)?$/.test(v) ? Number(v) : NaN; };
+  return { lines, split, num };
+}
+function parseOddsCSV(text) {
+  const { lines, split, num } = csvReader(text);
+  if (!lines.length) return { byMarket: {}, unassigned: [], count: 0 };
+  const head = lines[0];
   let marketCol = -1, start = 0;
   const first = split(head);
   if (first.filter(c => isFinite(num(c))).length < 3) {
@@ -161,6 +167,40 @@ function parseOddsCSV(text) {
   return { byMarket, unassigned, count };
 }
 
+// ---------- žaidėjų koeficientai ----------
+// Eilutė: žaidėjas, (rodiklis), linija, daugiau, mažiau. Žaidėjo vardas yra pirmas neskaitinis langelis
+// (arba stulpelis „player“/„žaidėjas“), rodiklis imamas iš stulpelio „stat“/„rodiklis“, jei jis yra.
+const STATS = [
+  ["pts", "Taškai", /^(pts|points|taškai|taskai|taškų|tasku)/i],
+  ["reb", "Atkovoti kamuoliai", /^(reb|rebounds|atkovot|atk)/i],
+  ["ast", "Rez. perdavimai", /^(ast|assists|rez|perdav)/i],
+  ["3pm", "Tritaškiai", /^(3pm|3pt|threes|tritašk|tritask)/i],
+  ["pra", "Taškai + atk. + perd.", /^(pra|pts\s*\+\s*reb\s*\+\s*ast|t\s*\+\s*a\s*\+\s*p)/i],
+  ["other", "Kita", /^(other|kita)/i],
+];
+const statKey = s => STATS.find(([, , re]) => re.test(String(s || "").trim()))?.[0] || null;
+function parsePlayerCSV(text) {
+  const { lines, split, num } = csvReader(text);
+  if (!lines.length) return { rows: [], count: 0 };
+  let nameCol = -1, statCol = -1, start = 0;
+  const first = split(lines[0]);
+  if (first.filter(c => isFinite(num(c))).length < 3) {
+    start = 1;
+    nameCol = first.findIndex(c => /^(player|žaidėjas|zaidejas|žaidėjai|vardas|name)$/i.test(c));
+    statCol = first.findIndex(c => /^(stat|rodiklis|market|rinka|tipas|type)$/i.test(c));
+  }
+  const rows = [];
+  for (const line of lines.slice(start)) {
+    const cells = split(line);
+    const nums = cells.filter((c, i) => i !== nameCol && i !== statCol).map(num).filter(Number.isFinite);
+    if (nums.length < 3) continue;
+    const name = nameCol >= 0 ? cells[nameCol] : cells.find((c, i) => i !== statCol && c && !isFinite(num(c)));
+    if (!name) continue;
+    rows.push({ n: name, s: statCol >= 0 ? statKey(cells[statCol]) : null, l: String(nums[0]), a: nums[1].toFixed(2), b: nums[2].toFixed(2) });
+  }
+  return { rows, count: rows.length };
+}
+
 if (typeof module !== "undefined") {
-  module.exports = { erf, Phi, PhiInv, rowCalc, fit, pOver, scoreModel, gridCells, conditionProbability, VARS, OPS, parseOddsCSV };
+  module.exports = { erf, Phi, PhiInv, rowCalc, fit, pOver, scoreModel, gridCells, conditionProbability, VARS, OPS, parseOddsCSV, STATS, statKey, parsePlayerCSV };
 }
